@@ -139,7 +139,9 @@ type Client struct {
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
 	mu                    sync.RWMutex
+	recorders             ThreadSafeMap[string, *rtpRecorder]
 	peerConnection        *PeerConnection
+
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
 	// pending published tracks are the remote tracks that still state as unknown source, and can't be published until the client state the source media or screen
@@ -321,6 +323,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRemoteNegotiation:          &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(localCtx),
 		mu:                             sync.RWMutex{},
+		recorders:                      ThreadSafeMap[string, *rtpRecorder]{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
@@ -980,6 +983,33 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 	if c.onAllowedRemoteRenegotiation != nil {
 		c.isInRemoteNegotiation.Store(true)
 		go c.onAllowedRemoteRenegotiation()
+	}
+}
+
+func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
+	_, ok := c.recorders.Load(trackID)
+	t, err := c.tracks.Get(trackID)
+	if err != nil {
+		return
+	}
+
+	if !ok {
+		c.recorders.Store(trackID, newRTPRecorder(
+			fmt.Sprintf("%s.ogg", trackID),
+			trackID,
+			t,
+		))
+	}
+	track, _ := c.recorders.Load(trackID)
+
+	if track.track.Kind() != webrtc.RTPCodecTypeAudio {
+		return
+	}
+
+	if shouldRecord {
+		track.startRecording()
+	} else {
+		track.stopRecording()
 	}
 }
 
