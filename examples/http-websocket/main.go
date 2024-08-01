@@ -132,6 +132,7 @@ func main() {
 				setTracks[track.ID()] = sfu.TrackTypeMedia
 			}
 			fc.Client.SetTracksSourceType(setTracks)
+
 		})
 	}
 
@@ -232,6 +233,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
+			client.ToggleTrackRecord(track.ID(), true)
 		}
 		resp := Respose{
 			Status: true,
@@ -240,7 +242,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		}
 
 		trackAddedResp, _ := json.Marshal(resp)
-
 		_, _ = conn.Write(trackAddedResp)
 	})
 

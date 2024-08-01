@@ -116,6 +116,7 @@
     <script type="module">
         import { InliveVideoObserver } from './inlive-video-observer.js'
         let clientid = null
+        let isRecording = false
         const peerConnection = new RTCPeerConnection({
             iceServers: [
                 {
@@ -490,16 +491,16 @@
                 let audioCodecsPref = [];
 
                 for (let i = 0; i < audioCodecs.length; i++) {
-                    if (audioCodecs[i].mimeType == "audio/PCMU") {
+                    if (audioCodecs[i].mimeType == "audio/opus") {
                         audioCodecsPref.push(audioCodecs[i]);
                     }
                 }
 
-                for (let i = 0; i < audioCodecs.length; i++) {
-                    if (audioCodecs[i].mimeType == "audio/PCMA") {
-                        audioCodecsPref.push(audioCodecs[i]);
-                    }
-                }
+                /*              for (let i = 0; i < audioCodecs.length; i++) {
+                                 if (audioCodecs[i].mimeType == "audio/PCMA") {
+                                     audioCodecsPref.push(audioCodecs[i]);
+                                 }
+                             } */
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
 
@@ -1011,6 +1012,10 @@
             ws.send(JSON.stringify({ type: 'offer', data: offer.sdp }));
         }
 
+        const toggleRecording = () => {
+            ws.send(JSON.stringify({ type: "toggle_recording", data: !isRecording }))
+        }
+
         document.addEventListener("DOMContentLoaded", function (event) {
             document.getElementById("btnStart").onclick = startH264;
             document.getElementById("btnStartVP9").onclick = startVP9;
@@ -1018,6 +1023,7 @@
             document.getElementById("btnToggleCam").onclick = toggleCam;
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
+            document.getElementById("btnToggleRecording").onclick = toggleRecording;
             document.getElementById("selectQuality").onchange = switchQuality;
         });
     </script>
@@ -1041,6 +1047,7 @@
         <button id="btnStartVP9">Start with VP9</button>
         <button id="btnToggleMic">Mute Mic</button>
         <button id="btnToggleCam">Mute Cam</button>
+        <button id="btnToggleRecording">Start Recording</button>
         <span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
         <span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>
