@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -995,13 +996,26 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 	if t.Kind() != webrtc.RTPCodecTypeAudio {
 		return
 	}
-	if !ok {
 
-		rec, err := NewOpusRecorder(
-			fmt.Sprintf("%s.ogg", trackID),
-			t,
-		)
+	// Open the file in create mode, with write-only access.
+	f, err := os.Create("recording.ogg")
+	if err != nil {
+		c.log.Errorf("error creating file: %v", err)
+		return
+	}
+
+	w := NewChunkWriter(time.Millisecond*3000, func(c Chunk) {
+		_, err := f.Write(c)
 		if err != nil {
+			fmt.Printf("error writing chunk: %v", err)
+		}
+		fmt.Println("wrote chunk of length:", len(c))
+	})
+
+	if !ok {
+		rec, err := NewOpusRecorder(t, w)
+		if err != nil {
+			c.log.Errorf("error creating recorder: %v", err)
 			return
 		}
 		c.recorders.Store(t.ID(), rec)
@@ -1009,15 +1023,16 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 	trackRecorder, _ := c.recorders.Load(trackID)
 	c.OnTrackRemoved(
 		func(sourceType string, removedTrack *webrtc.TrackLocalStaticRTP) {
-			fmt.Printf("track removed : %s", removedTrack.ID())
+			fmt.Printf("track removed: %s", removedTrack.ID())
 			if t.ID() == removedTrack.ID() {
 				if err := trackRecorder.Close(); err != nil {
-					c.log.Errorf("error closing the track recorder: %w", err)
+					c.log.Errorf("error closing the track recorder: %v", err)
 					return
 				}
 				// remove from the track map
 				fmt.Println("removing the track")
 				c.recorders.LoadAndDelete(t.ID())
+				w.Close()
 			}
 		},
 	)

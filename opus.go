@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
@@ -22,10 +21,9 @@ type OpusRecorder struct {
 	packetChan  chan *rtp.Packet
 }
 
-func NewOpusRecorder(filePath string, track ITrack) (Recorder, error) {
+func NewOpusRecorder(track ITrack, writer *ChunkWriter) (Recorder, error) {
 	ctx, can := context.WithCancel(context.Background())
 	rec := &OpusRecorder{
-		fileName:    filePath,
 		buff:        bytes.Buffer{},
 		track:       track,
 		cancelCtx:   ctx,
@@ -33,9 +31,6 @@ func NewOpusRecorder(filePath string, track ITrack) (Recorder, error) {
 		isRecording: atomic.Bool{},
 		packetChan:  make(chan *rtp.Packet),
 	}
-	writer := NewChunkWriter(time.Millisecond*1000, func(c Chunk) {
-		fmt.Println("got chunk of size: ", len(c))
-	})
 	ogg, err := oggwriter.NewWith(writer, 8000, 2)
 	if err != nil {
 		return nil, err
