@@ -139,7 +139,7 @@ type Client struct {
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
 	mu                    sync.RWMutex
-	recorders             ThreadSafeMap[string, *rtpRecorder]
+	recorders             ThreadSafeMap[string, Recorder]
 	peerConnection        *PeerConnection
 
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
@@ -323,7 +323,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRemoteNegotiation:          &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(localCtx),
 		mu:                             sync.RWMutex{},
-		recorders:                      ThreadSafeMap[string, *rtpRecorder]{},
+		recorders:                      ThreadSafeMap[string, Recorder]{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
@@ -992,24 +992,35 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 	if err != nil {
 		return
 	}
-
 	if !ok {
-		c.recorders.Store(trackID, newRTPRecorder(
+		rec, err := NewOpusRecorder(
 			fmt.Sprintf("%s.ogg", trackID),
-			trackID,
 			t,
-		))
+		)
+		if err != nil {
+			return
+		}
+		c.recorders.Store(t.ID(), rec)
 	}
-	track, _ := c.recorders.Load(trackID)
-
-	if track.track.Kind() != webrtc.RTPCodecTypeAudio {
-		return
-	}
-
+	trackRecorder, _ := c.recorders.Load(trackID)
+	c.OnTrackRemoved(
+		func(sourceType string, removedTrack *webrtc.TrackLocalStaticRTP) {
+			fmt.Printf("track removed : %s", removedTrack.ID())
+			if t.ID() == removedTrack.ID() {
+				if err := trackRecorder.Close(); err != nil {
+					c.log.Errorf("error closing the track recorder: %w", err)
+					return
+				}
+				// remove from the track map
+				fmt.Println("removing the track")
+				c.recorders.LoadAndDelete(t.ID())
+			}
+		},
+	)
 	if shouldRecord {
-		track.startRecording()
+		trackRecorder.Start()
 	} else {
-		track.stopRecording()
+		trackRecorder.Stop()
 	}
 }
 

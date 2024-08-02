@@ -23,3 +23,6 @@ go.work
 *.lock
 __debug_bin*
 main
+
+*.ogg
+.DS_STORE
