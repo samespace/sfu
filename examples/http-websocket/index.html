@@ -490,17 +490,34 @@
 
                 let audioCodecsPref = [];
 
-                for (let i = 0; i < audioCodecs.length; i++) {
-                    if (audioCodecs[i].mimeType == "audio/opus") {
-                        audioCodecsPref.push(audioCodecs[i]);
+
+                if (confirm("use pcma only?")) {
+                    for (let i = 0; i < audioCodecs.length; i++) {
+                        if (audioCodecs[i].mimeType == "audio/PCMA") {
+                            audioCodecsPref.push(audioCodecs[i]);
+                        }
+                    }
+                } else {
+                    for (let i = 0; i < audioCodecs.length; i++) {
+                        if (audioCodecs[i].mimeType == "audio/opus") {
+                            audioCodecsPref.push(audioCodecs[i]);
+                        }
+                    }
+
+                    for (let i = 0; i < audioCodecs.length; i++) {
+                        if (audioCodecs[i].mimeType == "audio/PCMA") {
+                            audioCodecsPref.push(audioCodecs[i]);
+                        }
+                    }
+
+                    for (let i = 0; i < audioCodecs.length; i++) {
+                        if (audioCodecs[i].mimeType == "audio/PCMU") {
+                            audioCodecsPref.push(audioCodecs[i]);
+                        }
                     }
                 }
 
-                /*              for (let i = 0; i < audioCodecs.length; i++) {
-                                 if (audioCodecs[i].mimeType == "audio/PCMA") {
-                                     audioCodecsPref.push(audioCodecs[i]);
-                                 }
-                             } */
+
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
 
