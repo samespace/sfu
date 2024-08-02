@@ -1,11 +1,11 @@
 package sfu
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
@@ -33,7 +33,9 @@ func NewOpusRecorder(filePath string, track ITrack) (Recorder, error) {
 		isRecording: atomic.Bool{},
 		packetChan:  make(chan *rtp.Packet),
 	}
-	writer := bufio.NewWriter(&rec.buff)
+	writer := NewChunkWriter(time.Millisecond*1000, func(c Chunk) {
+		fmt.Println("got chunk of size: ", len(c))
+	})
 	ogg, err := oggwriter.NewWith(writer, 8000, 2)
 	if err != nil {
 		return nil, err
@@ -70,7 +72,7 @@ recordLoop:
 			fmt.Println("done")
 			break recordLoop
 		case packet := <-r.packetChan:
-			fmt.Println(packet.SequenceNumber, packet.Header.Timestamp)
+			go fmt.Println(packet.SequenceNumber, packet.Header.Timestamp)
 			if err := r.oggwriter.WriteRTP(packet); err != nil {
 				fmt.Println("err recording packet: ", err)
 			}

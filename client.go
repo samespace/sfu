@@ -992,7 +992,11 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 	if err != nil {
 		return
 	}
+	if t.Kind() != webrtc.RTPCodecTypeAudio {
+		return
+	}
 	if !ok {
+
 		rec, err := NewOpusRecorder(
 			fmt.Sprintf("%s.ogg", trackID),
 			t,
