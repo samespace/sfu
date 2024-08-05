@@ -102,7 +102,7 @@ func main() {
 	}
 
 	// create room manager first before create new room
-	roomManager := sfu.NewManager(ctx, "server-name-here", sfuOpts)
+	roomManager := sfu.NewManager(ctx, "wavetwopointo", sfuOpts)
 
 	// generate a new room id. You can extend this example into a multiple room by use this in it's own API endpoint
 	roomID := roomManager.CreateRoomID()
@@ -233,7 +233,9 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
-			client.ToggleTrackRecord(track.ID(), true)
+
+			err := client.ToggleTrackRecord(track.ID(), true)
+			fmt.Println(err)
 
 		}
 		resp := Respose{
