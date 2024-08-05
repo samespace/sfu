@@ -105,6 +105,7 @@ func (s *SFUClients) Remove(client *Client) error {
 }
 
 type SFU struct {
+	roomId                    string
 	bitrateConfigs            BitrateConfigs
 	clients                   *SFUClients
 	context                   context.Context
@@ -141,10 +142,11 @@ type sfuOptions struct {
 }
 
 // @Param muxPort: port for udp mux
-func New(ctx context.Context, opts sfuOptions) *SFU {
+func New(roomId string, ctx context.Context, opts sfuOptions) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
+		roomId:                    roomId,
 		clients:                   &SFUClients{clients: make(map[string]*Client), mu: sync.Mutex{}},
 		context:                   localCtx,
 		cancel:                    cancel,
@@ -178,7 +180,7 @@ func (s *SFU) addClient(client *Client) {
 func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	opts.settingEngine = *s.defaultSettingEngine
 
-	client := NewClient(s, id, name, peerConnectionConfig, opts)
+	client := NewClient(s, id, s.roomId, peerConnectionConfig, opts)
 
 	// Get the LocalDescription and take it to base64 so we can paste in browser
 	return client

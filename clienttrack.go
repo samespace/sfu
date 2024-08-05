@@ -127,6 +127,7 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if t.Kind() == webrtc.RTPCodecTypeAudio {
 		// do something here with audio level
+
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {

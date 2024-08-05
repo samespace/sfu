@@ -11,4 +11,6 @@ var (
 	ErrDecodingData   = errors.New("error decoding data")
 	ErrEncodingData   = errors.New("error encoding data")
 	ErrNotFound       = errors.New("not found")
+
+	ErrOnlyAudioSupported = errors.New("recorder can only work for audio tracks")
 )

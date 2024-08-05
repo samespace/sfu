@@ -124,6 +124,7 @@ type remoteClientStats struct {
 type Client struct {
 	id                    string
 	name                  string
+	roomId                string
 	bitrateController     *bitrateController
 	context               context.Context
 	cancel                context.CancelFunc
@@ -203,7 +204,7 @@ func DefaultClientOptions() ClientOptions {
 	}
 }
 
-func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	var client *Client
 	var vadInterceptor *voiceactivedetector.Interceptor
 
@@ -316,6 +317,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	client = &Client{
 		id:                             id,
 		name:                           name,
+		roomId:                         s.roomId,
 		context:                        localCtx,
 		cancel:                         cancel,
 		clientTracks:                   make(map[string]iClientTrack, 0),
@@ -987,57 +989,101 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 	}
 }
 
-func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
-	_, ok := c.recorders.Load(trackID)
-	t, err := c.tracks.Get(trackID)
+func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
+	trackRecorder, err := c.getOrCreateTrackRecorder(trackID)
 	if err != nil {
-		return
+		return err
 	}
-	if t.Kind() != webrtc.RTPCodecTypeAudio {
-		return
+	if shouldRecord {
+		return trackRecorder.Start()
+	}
+	return trackRecorder.Stop()
+}
+
+func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
+	if rec, ok := c.recorders.Load(trackID); ok {
+		return rec, nil
 	}
 
-	f, err := os.Create("recording.ogg")
+	track, err := c.tracks.Get(trackID)
 	if err != nil {
-		c.log.Errorf("error creating file: %v", err)
-		return
+		return nil, fmt.Errorf("track not found in client tracks: %w", err)
+	}
+	if track.Kind() != webrtc.RTPCodecTypeAudio {
+		return nil, ErrOnlyAudioSupported
 	}
 
-	w := NewChunkWriter(time.Millisecond*3000, func(c Chunk) {
-		_, err := f.Write(c)
-		if err != nil {
+	dir, err := c.createRecordingDirectory(trackID)
+	if err != nil {
+		return nil, err
+	}
+
+	file, err := os.Create(fmt.Sprintf("%s/audio.%s", dir, c.getTrackExtension(track.MimeType())))
+	if err != nil {
+		return nil, fmt.Errorf("error creating file: %v", err)
+	}
+
+	writer := NewChunkWriter(time.Millisecond*3000, func(chunk Chunk) {
+		if _, err := file.Write(chunk); err != nil {
 			fmt.Printf("error writing chunk: %v", err)
 		}
 	})
 
-	if !ok {
-		rec, err := NewPCMRecorder(PCMULaw, t, w)
-		if err != nil {
-			c.log.Errorf("error creating recorder: %v", err)
-			return
-		}
-		c.recorders.Store(t.ID(), rec)
+	recorder, err := c.createRecorderByMimeType(track, writer)
+	if err != nil {
+		return nil, fmt.Errorf("error creating recorder: %v", err)
 	}
-	trackRecorder, _ := c.recorders.Load(trackID)
-	c.OnTrackRemoved(
-		func(sourceType string, removedTrack *webrtc.TrackLocalStaticRTP) {
-			fmt.Printf("track removed: %s", removedTrack.ID())
-			if t.ID() == removedTrack.ID() {
-				if err := trackRecorder.Close(); err != nil {
-					c.log.Errorf("error closing the track recorder: %v", err)
-					return
-				}
-				// remove from the track map
-				c.recorders.LoadAndDelete(t.ID())
-				w.Close()
+	c.recorders.Store(trackID, recorder)
+	c.setupTrackRemovalHandler(trackID, track, recorder, writer)
+	return recorder, nil
+}
+
+func (c *Client) createRecorderByMimeType(track ITrack, writer *ChunkWriter) (Recorder, error) {
+	switch track.MimeType() {
+	case webrtc.MimeTypeOpus:
+		return NewOpusRecorder(track, writer)
+	case webrtc.MimeTypePCMA:
+		return NewPCMRecorder(PCMALaw, track, writer)
+	case webrtc.MimeTypePCMU:
+		return NewPCMRecorder(PCMULaw, track, writer)
+	default:
+		return nil, fmt.Errorf("unsupported track mime type: %s", track.MimeType())
+	}
+}
+
+func (c *Client) createRecordingDirectory(trackID string) (string, error) {
+	dir := fmt.Sprintf("recordings/%s/%s/%s", c.roomId, c.id, trackID)
+	if err := ensureDir(dir); err != nil {
+		return "", fmt.Errorf("unable to create recording directory: %w", err)
+	}
+	return dir, nil
+}
+
+func (c *Client) getTrackExtension(mimeType string) string {
+	switch mimeType {
+	case webrtc.MimeTypePCMA:
+		return "pcma"
+	case webrtc.MimeTypePCMU:
+		return "pcmu"
+	case webrtc.MimeTypeOpus:
+		return "opus"
+	default:
+		return "unknown"
+	}
+}
+
+func (c *Client) setupTrackRemovalHandler(trackID string, track ITrack, recorder Recorder, writer *ChunkWriter) {
+	fn := func(sourceType string, removedTrack *webrtc.TrackLocalStaticRTP) {
+		if track.ID() == removedTrack.ID() {
+			if err := recorder.Close(); err != nil {
+				c.log.Errorf("error closing the track recorder: %v", err)
 			}
-		},
-	)
-	if shouldRecord {
-		trackRecorder.Start()
-	} else {
-		trackRecorder.Stop()
+			c.recorders.Delete(trackID)
+			writer.Close()
+		}
 	}
+
+	c.OnTrackRemoved(fn)
 }
 
 func (c *Client) setClientTrack(t ITrack) iClientTrack {

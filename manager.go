@@ -90,7 +90,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		SettingEngine:  m.options.SettingEngine,
 	}
 
-	newSFU := New(m.context, sfuOpts)
+	newSFU := New(id, m.context, sfuOpts)
 
 	room := newRoom(id, name, newSFU, roomType, opts)
 
