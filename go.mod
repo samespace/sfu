@@ -1,6 +1,8 @@
 module github.com/samespace/sfu
 
-go 1.21
+go 1.21.5
+
+toolchain go1.22.5
 
 // replace github.com/pion/transport => ../../pion/pion-transport
 // replace github.com/pion/interceptor => ../../pion/pion-interceptor

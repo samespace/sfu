@@ -123,6 +123,7 @@ type remoteClientStats struct {
 type Client struct {
 	id                    string
 	name                  string
+	roomId                string
 	bitrateController     *bitrateController
 	context               context.Context
 	cancel                context.CancelFunc
@@ -140,7 +141,9 @@ type Client struct {
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
 	mu                    sync.RWMutex
+	recorders             ThreadSafeMap[string, Recorder]
 	peerConnection        *PeerConnection
+
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
 	// pending published tracks are the remote tracks that still state as unknown source, and can't be published until the client state the source media or screen
@@ -190,8 +193,8 @@ func DefaultClientOptions() ClientOptions {
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: true,
 		EnablePlayoutDelay:   true,
-		EnableOpusDTX:        true,
-		EnableOpusInbandFEC:  true,
+		EnableOpusDTX:        false,
+		EnableOpusInbandFEC:  false,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
 		JitterBufferMinWait:  20 * time.Millisecond,
@@ -200,7 +203,7 @@ func DefaultClientOptions() ClientOptions {
 	}
 }
 
-func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	var client *Client
 	var vadInterceptor *voiceactivedetector.Interceptor
 
@@ -313,6 +316,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	client = &Client{
 		id:                             id,
 		name:                           name,
+		roomId:                         s.roomId,
 		context:                        localCtx,
 		cancel:                         cancel,
 		clientTracks:                   make(map[string]iClientTrack, 0),
@@ -321,6 +325,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRemoteNegotiation:          &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(localCtx),
 		mu:                             sync.RWMutex{},
+		recorders:                      ThreadSafeMap[string, Recorder]{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
@@ -946,6 +951,28 @@ func (c *Client) allowRemoteRenegotiation() {
 		c.isInRemoteNegotiation.Store(true)
 		go c.onAllowedRemoteRenegotiation()
 	}
+}
+
+func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
+	trackRecorder, err := c.getOrCreateTrackRecorder(trackID)
+	if err != nil {
+		return err
+	}
+	if shouldRecord {
+		return trackRecorder.Start()
+	}
+	return trackRecorder.Stop()
+}
+
+func (c *Client) PauseRecorder(trackID string, shouldRecord bool) error {
+	trackRecorder, err := c.getOrCreateTrackRecorder(trackID)
+	if err != nil {
+		return err
+	}
+	if shouldRecord {
+		return trackRecorder.Continue()
+	}
+	return trackRecorder.Pause()
 }
 
 func (c *Client) setClientTrack(t ITrack) iClientTrack {

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"log"
 	"net"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -527,4 +528,13 @@ func copyRTPPacket(packet *rtp.Packet) *rtp.Packet {
 	newPacket.Payload = make([]byte, len(packet.Payload))
 	copy(newPacket.Payload, packet.Payload)
 	return newPacket
+}
+
+func ensureDir(dirName string) error {
+	err := os.MkdirAll(dirName, 0755)
+	if err == nil || os.IsExist(err) {
+		return nil
+	} else {
+		return err
+	}
 }

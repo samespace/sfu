@@ -102,7 +102,7 @@ func main() {
 	}
 
 	// create room manager first before create new room
-	roomManager := sfu.NewManager(ctx, "server-name-here", sfuOpts)
+	roomManager := sfu.NewManager(ctx, "wavetwopointo", sfuOpts)
 
 	// generate a new room id. You can extend this example into a multiple room by use this in it's own API endpoint
 	roomID := roomManager.CreateRoomID()
@@ -132,6 +132,7 @@ func main() {
 				setTracks[track.ID()] = sfu.TrackTypeMedia
 			}
 			fc.Client.SetTracksSourceType(setTracks)
+
 		})
 	}
 
@@ -232,6 +233,33 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
+
+			err := client.ToggleTrackRecord(track.ID(), true)
+			fmt.Println(err)
+
+			/* 	go func(track sfu.ITrack) {
+
+				if track.Kind() != webrtc.RTPCodecTypeAudio {
+					return
+				}
+
+				ticker := time.NewTicker(time.Second * 6)
+				shouldRecord := atomic.Bool{}
+				shouldRecord.Store(false)
+
+				for range ticker.C {
+					if shouldRecord.Load() {
+						client.PauseRecorder(track.ID(), true)
+						fmt.Println("starting recording")
+						shouldRecord.Store(false)
+					} else {
+						client.PauseRecorder(track.ID(), false)
+						fmt.Println("stopping recording")
+						shouldRecord.Store(true)
+					}
+				}
+			}(track) */
+
 		}
 		resp := Respose{
 			Status: true,
@@ -240,7 +268,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		}
 
 		trackAddedResp, _ := json.Marshal(resp)
-
 		_, _ = conn.Write(trackAddedResp)
 	})
 

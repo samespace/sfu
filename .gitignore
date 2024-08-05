@@ -23,3 +23,10 @@ go.work
 *.lock
 __debug_bin*
 main
+
+*.ogg
+*.wav
+*.raw
+
+recordings/*/
+.DS_STORE
