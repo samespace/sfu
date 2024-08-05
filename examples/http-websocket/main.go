@@ -234,6 +234,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
 			client.ToggleTrackRecord(track.ID(), true)
+
 		}
 		resp := Respose{
 			Status: true,

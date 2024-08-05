@@ -4,6 +4,6 @@ type Recorder interface {
 	Start() error
 	Stop() error
 	Pause() error
-	Contiune() error
+	Continue() error
 	Close() error
 }

@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -11,75 +10,70 @@ import (
 )
 
 type OpusRecorder struct {
-	fileName    string
 	oggwriter   *oggwriter.OggWriter
 	track       ITrack
-	buff        bytes.Buffer
 	cancelCtx   context.Context
-	cancleFn    func()
+	cancelFn    context.CancelFunc
 	isRecording atomic.Bool
 	packetChan  chan *rtp.Packet
 }
 
 func NewOpusRecorder(track ITrack, writer *ChunkWriter) (Recorder, error) {
-	ctx, can := context.WithCancel(context.Background())
+	ogg, err := oggwriter.NewWith(writer, 48000, 2) // Use a common sample rate for Opus
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OggWriter: %w", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	rec := &OpusRecorder{
-		buff:        bytes.Buffer{},
 		track:       track,
 		cancelCtx:   ctx,
-		cancleFn:    can,
+		cancelFn:    cancel,
 		isRecording: atomic.Bool{},
-		packetChan:  make(chan *rtp.Packet),
+		packetChan:  make(chan *rtp.Packet, 100), // Buffered channel to prevent blocking
+		oggwriter:   ogg,
 	}
-	ogg, err := oggwriter.NewWith(writer, 8000, 2)
-	if err != nil {
-		return nil, err
-	}
-	rec.oggwriter = ogg
 	return rec, nil
 }
 
 func (r *OpusRecorder) Start() error {
-	if r.isRecording.Load() {
+	if !r.isRecording.CompareAndSwap(false, true) {
 		return nil
 	}
-	r.isRecording.Store(true)
 	go r.recordMedia()
 	return nil
 }
 
 func (r *OpusRecorder) recordMedia() {
-	t := r.track
+	defer r.Stop()
 
-	t.OnRead(func(p *rtp.Packet, _ QualityLevel) {
+	r.track.OnRead(func(p *rtp.Packet, _ QualityLevel) {
 		packetCopy := *p // Create a copy of the packet
-		r.packetChan <- &packetCopy
+		select {
+		case r.packetChan <- &packetCopy:
+		default:
+			fmt.Println("packet channel is full, dropping packet")
+		}
 	})
 
-	defer func() {
-		r.Stop()
-	}()
-
-recordLoop:
 	for {
 		select {
 		case <-r.cancelCtx.Done():
-			fmt.Println("done")
-			break recordLoop
+			return
 		case packet := <-r.packetChan:
-			go fmt.Println(packet.SequenceNumber, packet.Header.Timestamp)
 			if err := r.oggwriter.WriteRTP(packet); err != nil {
-				fmt.Println("err recording packet: ", err)
+				fmt.Println("error recording packet: ", err)
 			}
 		}
 	}
 }
 
 func (r *OpusRecorder) Stop() error {
-	if !r.isRecording.Load() {
+	if !r.isRecording.CompareAndSwap(true, false) {
 		return nil
 	}
-	r.cancleFn()
+	r.cancelFn()
+	close(r.packetChan) // Close the channel to avoid leaks
 	return nil
 }
 
@@ -87,11 +81,14 @@ func (r *OpusRecorder) Pause() error {
 	return fmt.Errorf("not implemented")
 }
 
-func (r *OpusRecorder) Contiune() error {
+func (r *OpusRecorder) Continue() error {
 	return fmt.Errorf("not implemented")
 }
 
 func (r *OpusRecorder) Close() error {
-	r.cancleFn()
-	return r.oggwriter.Close()
+	r.Stop()
+	if err := r.oggwriter.Close(); err != nil {
+		return fmt.Errorf("failed to close OggWriter: %w", err)
+	}
+	return nil
 }

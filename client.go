@@ -193,8 +193,8 @@ func DefaultClientOptions() ClientOptions {
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: true,
 		EnablePlayoutDelay:   true,
-		EnableOpusDTX:        true,
-		EnableOpusInbandFEC:  true,
+		EnableOpusDTX:        false,
+		EnableOpusInbandFEC:  false,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
 		JitterBufferMinWait:  20 * time.Millisecond,
@@ -997,7 +997,6 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 		return
 	}
 
-	// Open the file in create mode, with write-only access.
 	f, err := os.Create("recording.ogg")
 	if err != nil {
 		c.log.Errorf("error creating file: %v", err)
@@ -1009,11 +1008,10 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 		if err != nil {
 			fmt.Printf("error writing chunk: %v", err)
 		}
-		fmt.Println("wrote chunk of length:", len(c))
 	})
 
 	if !ok {
-		rec, err := NewOpusRecorder(t, w)
+		rec, err := NewPCMRecorder(PCMULaw, t, w)
 		if err != nil {
 			c.log.Errorf("error creating recorder: %v", err)
 			return
@@ -1030,7 +1028,6 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) {
 					return
 				}
 				// remove from the track map
-				fmt.Println("removing the track")
 				c.recorders.LoadAndDelete(t.ID())
 				w.Close()
 			}

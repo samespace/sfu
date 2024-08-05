@@ -1,6 +1,8 @@
 module github.com/samespace/sfu
 
-go 1.21
+go 1.21.5
+
+toolchain go1.22.5
 
 // replace github.com/pion/transport => ../../pion/pion-transport
 // replace github.com/pion/interceptor => ../../pion/pion-interceptor
@@ -29,6 +31,7 @@ require (
 	github.com/pion/srtp/v3 v3.0.3 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.6 // indirect
+	github.com/sopro-dev/sopro-core v0.2.1 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	github.com/youpy/go-riff v0.1.0 // indirect
 	github.com/youpy/go-wav v0.3.2 // indirect
