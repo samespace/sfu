@@ -1820,3 +1820,100 @@ func (c *Client) onNetworkConditionChanged(condition networkmonitor.NetworkCondi
 		c.onNetworkConditionChangedFunc(condition)
 	}
 }
+
+func (c *Client) GenerateOffer() (*webrtc.SessionDescription, error) {
+	// Create an offer to send to the client
+	offer, err := c.peerConnection.PC().CreateOffer(nil)
+	if err != nil {
+		c.log.Errorf("client: error create offer ", err)
+		return nil, err
+	}
+	err = c.peerConnection.PC().SetLocalDescription(offer)
+	if err != nil {
+		c.log.Errorf("client: error set local description ", err)
+		return nil, err
+	}
+
+	// allow add candidates once the local description is set
+	c.canAddCandidate.Store(true)
+
+	sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+
+	return &sdp, nil
+}
+
+func (c *Client) NegotiateAnswer(answer webrtc.SessionDescription) error {
+	c.isInRemoteNegotiation.Store(true)
+
+	defer func() {
+		c.isInRemoteNegotiation.Store(false)
+		if c.negotiationNeeded.Load() {
+			c.renegotiate()
+		}
+	}()
+
+	currentReceiversCount := 0
+	currentSendersCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			currentReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			currentSendersCount++
+		}
+	}
+
+	if !c.receiveRED {
+		match, err := regexp.MatchString(`a=rtpmap:63`, answer.SDP)
+		if err != nil {
+			c.log.Errorf("client: error on check RED support in SDP ", err)
+		} else {
+			c.receiveRED = match
+		}
+	}
+
+	// Set the remote SessionDescription
+	err := c.peerConnection.PC().SetRemoteDescription(answer)
+	if err != nil {
+		c.log.Errorf("client: error set remote description ", err)
+
+		return err
+	}
+
+	// process pending ice
+	for _, iceCandidate := range c.pendingRemoteCandidates {
+		err = c.peerConnection.PC().AddICECandidate(iceCandidate)
+		if err != nil {
+			c.log.Errorf("client: error add ice candidate ", err)
+			return err
+		}
+	}
+
+	newReceiversCount := 0
+	newSenderCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			newReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			newSenderCount++
+		}
+	}
+
+	initialReceiverCount := newReceiversCount - currentReceiversCount
+
+	c.initialReceiverCount.Store(uint32(initialReceiverCount))
+
+	initialSenderCount := newSenderCount - currentSendersCount
+
+	c.initialSenderCount.Store(uint32(initialSenderCount))
+
+	// send pending local candidates if any
+	go c.sendPendingLocalCandidates()
+
+	c.pendingRemoteCandidates = nil
+
+	return nil
+}
