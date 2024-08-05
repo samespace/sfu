@@ -23,19 +23,12 @@ require (
 )
 
 require (
-	github.com/go-audio/audio v1.0.0 // indirect
-	github.com/go-audio/riff v1.0.0 // indirect
-	github.com/go-audio/wav v1.1.0 // indirect
 	github.com/pion/dtls/v3 v3.0.0 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/srtp/v3 v3.0.3 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.6 // indirect
-	github.com/sopro-dev/sopro-core v0.2.1 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
-	github.com/youpy/go-riff v0.1.0 // indirect
-	github.com/youpy/go-wav v0.3.2 // indirect
-	github.com/zaf/g711 v0.0.0-20190814101024-76a4a538f52b // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
