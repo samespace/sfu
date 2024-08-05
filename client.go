@@ -999,6 +999,17 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
 	return trackRecorder.Stop()
 }
 
+func (c *Client) PauseRecorder(trackID string, shouldRecord bool) error {
+	trackRecorder, err := c.getOrCreateTrackRecorder(trackID)
+	if err != nil {
+		return err
+	}
+	if shouldRecord {
+		return trackRecorder.Continue()
+	}
+	return trackRecorder.Pause()
+}
+
 func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	var outputTrack iClientTrack
 

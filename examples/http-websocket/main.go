@@ -237,6 +237,29 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 			err := client.ToggleTrackRecord(track.ID(), true)
 			fmt.Println(err)
 
+			/* 	go func(track sfu.ITrack) {
+
+				if track.Kind() != webrtc.RTPCodecTypeAudio {
+					return
+				}
+
+				ticker := time.NewTicker(time.Second * 6)
+				shouldRecord := atomic.Bool{}
+				shouldRecord.Store(false)
+
+				for range ticker.C {
+					if shouldRecord.Load() {
+						client.PauseRecorder(track.ID(), true)
+						fmt.Println("starting recording")
+						shouldRecord.Store(false)
+					} else {
+						client.PauseRecorder(track.ID(), false)
+						fmt.Println("stopping recording")
+						shouldRecord.Store(true)
+					}
+				}
+			}(track) */
+
 		}
 		resp := Respose{
 			Status: true,

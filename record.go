@@ -16,6 +16,10 @@ type Recorder interface {
 	Close() error
 }
 
+const (
+	bufferDuration = time.Second * 2
+)
+
 func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
 	if rec, ok := c.recorders.Load(trackID); ok {
 		return rec, nil
@@ -39,7 +43,7 @@ func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
 		return nil, fmt.Errorf("error creating file: %v", err)
 	}
 
-	writer := NewChunkWriter(time.Millisecond*3000, func(chunk Chunk) {
+	writer := NewChunkWriter(bufferDuration, func(chunk Chunk) {
 		if _, err := file.Write(chunk); err != nil {
 			fmt.Printf("error writing chunk: %v", err)
 		}
