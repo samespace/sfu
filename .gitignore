@@ -27,4 +27,6 @@ main
 *.ogg
 *.wav
 *.raw
+
+recordings/*/
 .DS_STORE
