@@ -109,20 +109,3 @@ func (r *OpusRecorder) Close() error {
 	}
 	return nil
 }
-
-func (r *OpusRecorder) createBlankOpusPacket(original *rtp.Packet) *rtp.Packet {
-	blankPacket := &rtp.Packet{
-		Header: rtp.Header{
-			Version:        2,
-			Padding:        false,
-			Extension:      false,
-			Marker:         false,
-			PayloadType:    original.PayloadType,
-			SequenceNumber: original.SequenceNumber,
-			Timestamp:      original.Timestamp,
-			SSRC:           original.SSRC,
-		},
-		Payload: []byte{0xF8, 0xFF, 0xFE}, // Opus silence payload
-	}
-	return blankPacket
-}

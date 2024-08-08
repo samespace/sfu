@@ -1034,7 +1034,9 @@ func (c *Client) startTrackRecord(track ITrack) error {
 	}
 	c.recorders.Store(track.ID(), recorder)
 	c.setupTrackRemovalHandler(track.ID(), track, recorder, writer)
-
+	writeRecordingMetadata(
+		fmt.Sprintf("%s/meta.json", dir),
+	)
 	recorder.Start()
 	return nil
 }

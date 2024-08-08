@@ -1,11 +1,13 @@
 package sfu
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/samespace/sfu/processing"
 )
 
 type Recorder interface {
@@ -104,4 +106,21 @@ func (c *Client) setupTrackRemovalHandler(trackID string, track ITrack, recorder
 	}
 
 	c.OnTrackRemoved(fn)
+}
+
+func writeRecordingMetadata(dir string) error {
+	file, err := os.OpenFile(dir, os.O_RDWR|os.O_CREATE, 0666)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	meta := processing.RecordMetadata{
+		StartTime: time.Now(),
+	}
+	j, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	_, err = file.Write(j)
+	return err
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
+	"github.com/samespace/sfu/processing"
 	"golang.org/x/net/websocket"
 )
 
@@ -70,6 +71,10 @@ const (
 var logger logging.LeveledLogger
 
 func main() {
+
+	err := processing.ProcessRoom("WSdTuDFxcZ1PUc3x")
+	fmt.Println(err)
+
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
@@ -157,7 +162,7 @@ func main() {
 
 	logger.Info("Listening on http://localhost:8000 ...")
 
-	err := http.ListenAndServe(":8000", nil)
+	err = http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Panic(err)
 	}
