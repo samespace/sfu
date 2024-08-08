@@ -21,9 +21,7 @@ type Options struct {
 	IceServers               []webrtc.ICEServer
 	MinPlayoutDelay          uint16
 	MaxPlayoutDelay          uint16
-	// SettingEngine is used to configure the WebRTC engine
-	// Use this to configure use of enable/disable mDNS, network types, use single port mux, etc.
-	SettingEngine *webrtc.SettingEngine
+	SettingEngine            *webrtc.SettingEngine
 }
 
 func DefaultOptions() Options {
@@ -85,15 +83,18 @@ type RoomOptions struct {
 	QualityPresets QualityPresets `json:"quality_presets"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
 	EmptyRoomTimeout time.Duration `json:"empty_room_timeout_ns" example:"300000000000" default:"300000000000"`
+	// Enables recording for all client tracks by default
+	AutoEnableRecording bool
 }
 
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
-		Bitrates:         DefaultBitrates(),
-		QualityPresets:   DefaultQualityPresets(),
-		Codecs:           []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
-		PLIInterval:      0,
-		EmptyRoomTimeout: 3 * time.Minute,
+		Bitrates:            DefaultBitrates(),
+		QualityPresets:      DefaultQualityPresets(),
+		Codecs:              []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
+		PLIInterval:         0,
+		EmptyRoomTimeout:    3 * time.Minute,
+		AutoEnableRecording: false,
 	}
 }
 
@@ -195,6 +196,10 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	client, _ := r.sfu.GetClient(id)
 	if client != nil {
 		return nil, ErrClientExists
+	}
+
+	if r.options.AutoEnableRecording {
+		opts.AutoStartRecording = true
 	}
 
 	client = r.sfu.NewClient(id, name, opts)

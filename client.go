@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -82,9 +83,10 @@ type ClientOptions struct {
 	JitterBufferMinWait time.Duration `json:"jitter_buffer_min_wait"`
 	JitterBufferMaxWait time.Duration `json:"jitter_buffer_max_wait"`
 	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
-	ReorderPackets bool `json:"reorder_packets"`
-	Log            logging.LeveledLogger
-	settingEngine  webrtc.SettingEngine
+	ReorderPackets     bool `json:"reorder_packets"`
+	Log                logging.LeveledLogger
+	AutoStartRecording bool
+	settingEngine      webrtc.SettingEngine
 }
 
 type internalDataMessage struct {
@@ -200,6 +202,7 @@ func DefaultClientOptions() ClientOptions {
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		ReorderPackets:       false,
+		AutoStartRecording:   false,
 	}
 }
 
@@ -349,6 +352,14 @@ func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuratio
 	}
 
 	client.onTrack = func(track ITrack) {
+
+		if assertAudioMimeType(track.MimeType()) && client.options.AutoStartRecording {
+			err := client.startTrackRecord(track)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
 			s.log.Errorf("client: client %s track already added ", track.ID())
 			// not an error could be because a simulcast track already added
@@ -364,13 +375,14 @@ func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuratio
 			return
 		}
 
-		s.log.Infof("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
+		s.log.Infof("sfu:̀ client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
 
 		addedTracks := client.pendingPublishedTracks.GetTracks()
 
 		if client.onTracksAdded != nil {
 			client.onTracksAdded(addedTracks)
 		}
+
 	}
 
 	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
@@ -997,6 +1009,34 @@ func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
 		return trackRecorder.Start()
 	}
 	return trackRecorder.Stop()
+}
+
+func (c *Client) startTrackRecord(track ITrack) error {
+	dir, err := c.createRecordingDirectory(track.ID())
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(fmt.Sprintf("%s/audio.%s", dir, c.getTrackExtension(track.MimeType())))
+	if err != nil {
+		return fmt.Errorf("error creating file: %v", err)
+	}
+
+	writer := NewChunkWriter(bufferDuration, func(chunk Chunk) {
+		if _, err := file.Write(chunk); err != nil {
+			fmt.Printf("error writing chunk: %v", err)
+		}
+	})
+
+	recorder, err := c.createRecorderByMimeType(track, writer)
+	if err != nil {
+		return fmt.Errorf("error creating recorder: %v", err)
+	}
+	c.recorders.Store(track.ID(), recorder)
+	c.setupTrackRemovalHandler(track.ID(), track, recorder, writer)
+
+	recorder.Start()
+	return nil
 }
 
 func (c *Client) PauseRecorder(trackID string, shouldRecord bool) error {
@@ -1734,6 +1774,7 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 }
 
 func (c *Client) onTracksAvailable(tracks []ITrack) {
+	fmt.Println("tracks available : ", tracks)
 	for _, callback := range c.onTracksAvailableCallbacks {
 		callback(tracks)
 	}

@@ -28,5 +28,5 @@ main
 *.wav
 *.raw
 
-recordings/*/
+examples/http-websocket/recordings
 .DS_STORE

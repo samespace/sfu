@@ -538,3 +538,41 @@ func ensureDir(dirName string) error {
 		return err
 	}
 }
+
+func createBlankPacket(mimeType string, original *rtp.Packet) *rtp.Packet {
+	var silencePayload []byte
+	switch mimeType {
+	case webrtc.MimeTypeOpus:
+		silencePayload = []byte{0xF8, 0xFF, 0xFE}
+	case webrtc.MimeTypePCMU:
+		silencePayload = []byte{0xFF}
+	case webrtc.MimeTypePCMA:
+		silencePayload = []byte{0xD5}
+	default:
+		silencePayload = []byte{}
+	}
+
+	blankPacket := &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			Padding:        false,
+			Extension:      false,
+			Marker:         false,
+			PayloadType:    original.PayloadType,
+			SequenceNumber: original.SequenceNumber,
+			Timestamp:      original.Timestamp,
+			SSRC:           original.SSRC,
+		},
+		Payload: silencePayload,
+	}
+	return blankPacket
+}
+
+func assertAudioMimeType(mime string) bool {
+	for _, m := range []string{webrtc.MimeTypeOpus, webrtc.MimeTypePCMA, webrtc.MimeTypePCMU} {
+		if m == mime {
+			return true
+		}
+	}
+	return false
+}

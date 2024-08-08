@@ -110,9 +110,11 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
+	roomsOpts.AutoEnableRecording = true
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
+
 	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
 	// defer turnServer.Close()
 
@@ -161,7 +163,7 @@ func main() {
 	}
 }
 
-func statsHandler(w http.ResponseWriter, r *http.Request, room *sfu.Room) {
+func statsHandler(w http.ResponseWriter, _ *http.Request, room *sfu.Room) {
 	stats := room.Stats()
 
 	statsJSON, _ := json.Marshal(stats)
@@ -211,6 +213,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	opts := sfu.DefaultClientOptions()
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
+	opts.Log = logging.NewDefaultLoggerFactory().NewLogger(clientID)
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
@@ -230,12 +233,12 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// client.SubscribeAllTracks()
 
 	client.OnTracksAdded(func(tracks []sfu.ITrack) {
+
+		fmt.Println("on Tracks added called in client!!!")
+
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
-
-			err := client.ToggleTrackRecord(track.ID(), true)
-			fmt.Println(err)
 
 			/* 	go func(track sfu.ITrack) {
 

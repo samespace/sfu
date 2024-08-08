@@ -64,7 +64,7 @@ func (r *OpusRecorder) recordMedia() {
 			return
 		case packet := <-r.packetChan:
 			if r.isPaused.Load() {
-				blankPacket := r.createBlankOpusPacket(packet)
+				blankPacket := createBlankPacket(r.track.MimeType(), packet)
 				if err := r.oggwriter.WriteRTP(blankPacket); err != nil {
 					fmt.Println("error writing blank packet: ", err)
 				}
