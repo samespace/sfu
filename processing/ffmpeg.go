@@ -25,9 +25,9 @@ func opusToPcm(src, dst string) error {
 func pcmToLPcm(audioType audioType, src, dst string) error {
 	var format string
 	switch audioType {
-	case "ulaw":
+	case "pcmu":
 		format = "mulaw"
-	case "alaw":
+	case "pcma":
 		format = "alaw"
 	default:
 		return fmt.Errorf("unsupported audio type: %s", audioType)

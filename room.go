@@ -93,7 +93,7 @@ func DefaultRoomOptions() RoomOptions {
 		QualityPresets:      DefaultQualityPresets(),
 		Codecs:              []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
 		PLIInterval:         0,
-		EmptyRoomTimeout:    3 * time.Minute,
+		EmptyRoomTimeout:    1 * time.Minute,
 		AutoEnableRecording: false,
 	}
 }
