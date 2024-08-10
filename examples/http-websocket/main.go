@@ -72,7 +72,9 @@ var logger logging.LeveledLogger
 
 func main() {
 
-	err := processing.ProcessRoom("WSdTuDFxcZ1PUc3x")
+	var err error
+
+	err = processing.ProcessRoom("Hs6nFjySYToZ27yA")
 	fmt.Println(err)
 
 	flag.Set("logtostderr", "true")
@@ -91,11 +93,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	defer cancel()
-
 	sfuOpts := sfu.DefaultOptions()
 
 	sfuOpts.EnableBandwidthEstimator = true
-
 	fakeClientCount := 0
 
 	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
