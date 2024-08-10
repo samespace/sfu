@@ -123,7 +123,7 @@ func (p *AudioPlayer) Stop() {
 func (p *AudioPlayer) playStream(reader io.ReadCloser, packetType PacketType) error {
 	switch packetType {
 	case PacketTypeOPUS:
-		p.reader, _ = NewOggSampler(reader, p.track.WriteSample)
+		p.reader, _ = NewOggSampler(reader, p.track)
 	}
 
 	p.changeState(AudioPlayerStatePlaying)

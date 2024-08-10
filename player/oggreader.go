@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 )
@@ -14,12 +15,12 @@ import (
 const oggPageDuration = time.Millisecond * 20
 
 type OggSampler struct {
-	reader   io.ReadCloser
-	ogg      *oggreader.OggReader
-	onSample func(media.Sample) error
+	reader io.ReadCloser
+	ogg    *oggreader.OggReader
+	track  *webrtc.TrackLocalStaticSample
 }
 
-func NewOggSampler(reader io.ReadCloser, onSample func(media.Sample) error) (Sampler, error) {
+func NewOggSampler(reader io.ReadCloser, track *webrtc.TrackLocalStaticSample) (Sampler, error) {
 	ogg, _, oggErr := oggreader.NewWith(reader)
 	if oggErr != nil {
 		panic(oggErr)
@@ -28,7 +29,7 @@ func NewOggSampler(reader io.ReadCloser, onSample func(media.Sample) error) (Sam
 	sampler := &OggSampler{
 		reader,
 		ogg,
-		onSample,
+		track,
 	}
 
 	go sampler.startReader()
@@ -56,7 +57,9 @@ func (r *OggSampler) startReader() {
 		lastGranule = pageHeader.GranulePosition
 		sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
 
-		r.onSample(media.Sample{Data: pageData, Duration: sampleDuration})
+		if err := r.track.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); err != nil {
+			fmt.Println("error writing sample to track : %w", err)
+		}
 	}
 
 }
