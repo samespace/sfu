@@ -37,8 +37,6 @@ func (pp *postProcessor) processRoom(roomID string) {
 	err := pp.processRecordings(dir)
 	if err != nil {
 		fmt.Printf("Error processing room %s: %v\n", roomID, err)
-	} else {
-		fmt.Printf("Successfully processed room %s\n", roomID)
 	}
 }
 

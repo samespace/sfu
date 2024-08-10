@@ -99,18 +99,15 @@ func readRoom(roomId string) (*roomData, error) {
 
 		for _, trackDir := range trackDirs {
 			if !trackDir.IsDir() {
-				fmt.Println("not a dir", trackDir)
 				continue
 			}
 
-			fmt.Println(trackDir)
 			trackDirPath := filepath.Join(clientDirPath, trackDir.Name())
 			metaFilePath := filepath.Join(trackDirPath, "meta.json")
 
 			// Read metadata file
 			metaData, err := readMetadata(metaFilePath)
 			if err != nil {
-				fmt.Println(metaFilePath, err)
 				return nil, fmt.Errorf("failed to read metadata for track %s: %w", trackDir.Name(), err)
 			}
 
@@ -139,8 +136,6 @@ func readRoom(roomId string) (*roomData, error) {
 
 		client.Tracks = clientTracks
 		room.Clients = append(room.Clients, client)
-
-		fmt.Printf("Client %s has %d tracks\n", clientId, len(clientTracks))
 	}
 
 	return room, nil

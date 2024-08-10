@@ -3,7 +3,13 @@ package processing
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+/*
+x``
+ffmpeg -f lavfi -t 4.234 -i anullsrc=r=8000:cl=mono -i audio.wav -filter_complex "[0] [1] concat=n=2:v=0:a=1 [a]" -map "[a]" silenced.wav
+*/
 
 func ProcessRoom(roomId string) error {
 	room, err := readRoom(roomId)
@@ -17,6 +23,10 @@ func ProcessRoom(roomId string) error {
 		}
 	}
 
+	if err = mergeTracks(*room); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -24,7 +34,11 @@ func processClient(c roomClient) error {
 	if c.Tracks == nil {
 		return fmt.Errorf("no tracks found for client %s", c.ClientID)
 	}
-	return convertTracks(c.Tracks)
+	if err := convertTracks(c.Tracks); err != nil {
+		return fmt.Errorf("error converting tracks: %w", err)
+	}
+
+	return nil
 }
 
 func convertTracks(tracks []clientTrack) error {
@@ -32,14 +46,12 @@ func convertTracks(tracks []clientTrack) error {
 		var outputFileName string
 		var err error
 
-		// Determine output file name based on the track's audio type
 		switch track.AudioType {
 		case audioTypeOpus:
 			outputFileName = strings.TrimSuffix(track.TrackFileName, opusExtension) + wavExtension
 			err = opusToPcm(track.TrackFileName, outputFileName)
 
 		case audioTypeULaw, audioTypeALaw:
-			// Assumes that ulaw and alaw files have a .raw extension
 			outputFileName = strings.TrimSuffix(track.TrackFileName, pcmuExtention)
 			outputFileName = strings.TrimSuffix(outputFileName, pcmaExtention) + wavExtension
 			err = pcmToLPcm(track.AudioType, track.TrackFileName, outputFileName)
@@ -50,10 +62,60 @@ func convertTracks(tracks []clientTrack) error {
 
 		if err != nil {
 			fmt.Printf("Error converting track %s: %v\n", track.TrackFileName, err)
-		} else {
-			fmt.Printf("Successfully converted %s to %s\n", track.TrackFileName, outputFileName)
 		}
 	}
 
 	return nil
+}
+
+func mergeTracks(room roomData) error {
+	var tracks = getRoomTracks(room)
+	var earliestTimestamp time.Time
+	var trackOffsets = make(map[string]float32)
+
+	earliestTimestamp = time.Now().Add(24 * time.Hour)
+
+	for _, t := range tracks {
+		if t.StartTime.Before(earliestTimestamp) {
+			earliestTimestamp = t.StartTime
+		}
+	}
+
+	for _, t := range tracks {
+		offset := int(t.StartTime.Sub(earliestTimestamp).Milliseconds())
+		trackOffsets[t.TrackID] = float32(offset)
+	}
+
+	addSilence(tracks, trackOffsets)
+
+	mixInputs := []string{}
+
+	for _, t := range tracks {
+		in := t.TrackFileName
+		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
+			in = strings.Replace(in, n, "offset.wav", 1)
+		}
+		mixInputs = append(mixInputs, in)
+	}
+	err := mixAudio(mixInputs, fmt.Sprintf("recordings/%s/merged.wav", room.RoomId))
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addSilence(tracks []clientTrack, offsets map[string]float32) {
+	for _, t := range tracks {
+		input := t.TrackFileName
+		out := t.TrackFileName
+		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
+			out = strings.Replace(input, n, "offset.wav", 1)
+		}
+		err := addAudioSilence(input, out, offsets[t.TrackID])
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 }

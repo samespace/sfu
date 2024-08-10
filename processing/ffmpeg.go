@@ -2,66 +2,104 @@ package processing
 
 import (
 	"fmt"
-
-	ffmpeg "github.com/u2takey/ffmpeg-go"
+	"os/exec"
 )
 
-// Convert Opus to PCM16 format
 func opusToPcm(src, dst string) error {
-	err := ffmpeg.Input(src).
-		Output(dst, ffmpeg.KwArgs{
-			"acodec": "pcm_s16le", // Audio codec for PCM 16-bit little-endian
-			"ar":     "48000",     // Sample rate 48kHz
-			"ac":     "2",         // Number of audio channels (stereo)
-		}).
-		Run()
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", src,
+		"-acodec", "pcm_s16le",
+		"-ar", "48000",
+		"-ac", "2",
+		dst,
+	)
+
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to convert Opus to PCM16: %w", err)
+		return fmt.Errorf("failed to convert Opus to PCM16: %w, output: %s", err, output)
 	}
 	return nil
 }
 
-// Convert μ-law or A-law to PCM16 format
 func pcmToLPcm(audioType audioType, src, dst string) error {
 	var format string
 	switch audioType {
-	case audioTypeULaw:
-		format = "mulaw" // Input format is μ-law
-	case audioTypeALaw:
-		format = "alaw" // Input format is a-law
+	case "ulaw":
+		format = "mulaw"
+	case "alaw":
+		format = "alaw"
 	default:
 		return fmt.Errorf("unsupported audio type: %s", audioType)
 	}
 
-	err := ffmpeg.Input(src, ffmpeg.KwArgs{
-		"f":  format, // Input format (μ-law or a-law)
-		"ar": "8000", // Sample rate 8000 Hz
-		"ac": "1",    // Number of audio channels (mono)
-	}).
-		Output(dst, ffmpeg.KwArgs{
-			"acodec": "pcm_s16le", // Output codec is PCM 16-bit little-endian
-		}).
-		Run()
+	cmd := exec.Command(
+		"ffmpeg",
+		"-f", format,
+		"-ar", "8000",
+		"-ac", "1",
+		"-i", src,
+		"-acodec", "pcm_s16le",
+		dst,
+	)
+
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to convert %s to PCM16: %w", audioType, err)
+		return fmt.Errorf("error running ffmpeg: %v, output: %s", err, output)
 	}
+
 	return nil
 }
 
-// Create a silence audio file of the specified duration (in seconds)
-func createSilence(filePath string, duration float64) error {
-	err := ffmpeg.Input("anullsrc=r=48000:cl=stereo", ffmpeg.KwArgs{
-		"t": duration, // Duration of silence
-		"f": "lavfi",
-	}).
-		Output(filePath, ffmpeg.KwArgs{
-			"acodec": "pcm_s16le", // Audio codec for PCM 16-bit little-endian
-			"ar":     "48000",     // Sample rate 48kHz
-			"ac":     "2",         // Number of audio channels (stereo)
-		}).
-		Run()
+func addAudioSilence(in, out string, duration float32) error {
+	dur := fmt.Sprintf("%.2f", duration/1000)
+	var cmd *exec.Cmd
+
+	if dur == "0.00" {
+		cmd = exec.Command(
+			"ffmpeg",
+			"-i", in,
+			out,
+		)
+	} else {
+		cmd = exec.Command(
+			"ffmpeg",
+			"-f", "lavfi",
+			"-t", dur,
+			"-i", "anullsrc=r=8000:cl=mono",
+			"-i", in,
+			"-filter_complex", "[0][1]concat=n=2:v=0:a=1[a]",
+			"-map", "[a]",
+			out,
+		)
+	}
+
+	output, err := cmd.CombinedOutput()
+
 	if err != nil {
-		return fmt.Errorf("failed to create silence file %s: %w", filePath, err)
+		fmt.Println(cmd)
+		fmt.Println(string(output))
+	}
+
+	return err
+}
+
+func mixAudio(inputs []string, output string) error {
+	var ffmpegArgs []string
+	for _, input := range inputs {
+		ffmpegArgs = append(ffmpegArgs, "-i", input)
+	}
+
+	ffmpegArgs = append(ffmpegArgs,
+		"-filter_complex", fmt.Sprintf("amix=inputs=%d:duration=first:dropout_transition=3", len(inputs)),
+		output,
+	)
+
+	cmd := exec.Command("ffmpeg", ffmpegArgs...)
+
+	_, err := cmd.CombinedOutput()
+	if err != nil {
+		return err
 	}
 	return nil
 }
