@@ -115,7 +115,7 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
-	roomsOpts.AutoEnableRecording = true
+	roomsOpts.AutoEnableRecording = false
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
@@ -224,6 +224,14 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		log.Panic(err)
 		return
 	}
+
+	go func() {
+		player, _ := client.GetPlayer(webrtc.MimeTypeOpus)
+
+		time.Sleep(2 * time.Second)
+
+		player.PlayFile("audio.opus")
+	}()
 
 	if isDebug {
 		client.EnableDebug()
