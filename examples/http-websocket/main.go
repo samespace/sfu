@@ -75,7 +75,6 @@ func main() {
 
 	var err error
 
-	//fmt.Println(processing.ProcessRoom("OdA8KaFOKTGcXZB8"))
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
@@ -242,30 +241,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
-
-			/* 	go func(track sfu.ITrack) {
-
-				if track.Kind() != webrtc.RTPCodecTypeAudio {
-					return
-				}
-
-				ticker := time.NewTicker(time.Second * 6)
-				shouldRecord := atomic.Bool{}
-				shouldRecord.Store(false)
-
-				for range ticker.C {
-					if shouldRecord.Load() {
-						client.PauseRecorder(track.ID(), true)
-						fmt.Println("starting recording")
-						shouldRecord.Store(false)
-					} else {
-						client.PauseRecorder(track.ID(), false)
-						fmt.Println("stopping recording")
-						shouldRecord.Store(true)
-					}
-				}
-			}(track) */
-
 		}
 		resp := Respose{
 			Status: true,

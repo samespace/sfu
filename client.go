@@ -354,7 +354,7 @@ func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuratio
 		if assertAudioMimeType(track.MimeType()) && client.options.AutoStartRecording {
 			err := client.startTrackRecord(track.ID())
 			if err != nil {
-				fmt.Println(err)
+				client.log.Errorf("error auto starting the client recording : %w", err)
 			}
 		}
 
@@ -999,7 +999,9 @@ func (c *Client) ToggleRecord(shouldRecord bool) {
 	for _, t := range c.tracks.GetTracks() {
 		r, err := c.getOrCreateTrackRecorder(t.ID())
 		if err != nil {
-			fmt.Println(err)
+			if !errors.Is(ErrOnlyAudioSupported, err) {
+				c.log.Errorf("unable to get track recorder for track: %w", err)
+			}
 			continue
 		}
 		if shouldRecord {
@@ -1008,7 +1010,7 @@ func (c *Client) ToggleRecord(shouldRecord bool) {
 			err = r.Stop()
 		}
 		if err != nil {
-			fmt.Println(err)
+			c.log.Errorf("unable to change the recorder state : %w", err)
 		}
 	}
 }
@@ -1017,7 +1019,9 @@ func (c *Client) TogglePause(shouldPause bool) {
 	for _, t := range c.tracks.GetTracks() {
 		r, err := c.getOrCreateTrackRecorder(t.ID())
 		if err != nil {
-			fmt.Println(err)
+			if !errors.Is(ErrOnlyAudioSupported, err) {
+				c.log.Errorf("unable to get track recorder for track: %w", err)
+			}
 			continue
 		}
 		if shouldPause {
