@@ -1776,7 +1776,6 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 }
 
 func (c *Client) onTracksAvailable(tracks []ITrack) {
-	fmt.Println("tracks available : ", tracks)
 	for _, callback := range c.onTracksAvailableCallbacks {
 		callback(tracks)
 	}

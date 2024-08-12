@@ -91,7 +91,7 @@ func mixAudio(inputs []string, output string) error {
 	}
 
 	ffmpegArgs = append(ffmpegArgs,
-		"-filter_complex", fmt.Sprintf("amix=inputs=%d:duration=first:dropout_transition=3", len(inputs)),
+		"-filter_complex", fmt.Sprintf("amix=inputs=%d:duration=longest:dropout_transition=3", len(inputs)),
 		output,
 	)
 

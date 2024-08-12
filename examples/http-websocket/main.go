@@ -74,7 +74,7 @@ func main() {
 
 	var err error
 
-	err = processing.ProcessRoom("Hs6nFjySYToZ27yA")
+	err = processing.ProcessRoom("iF7nXzvHPntC155l")
 	fmt.Println(err)
 
 	flag.Set("logtostderr", "true")
@@ -119,6 +119,8 @@ func main() {
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
+
+	defaultRoom.AddExtension(sfu.NewClientLeftExtension())
 
 	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
 	// defer turnServer.Close()
@@ -238,9 +240,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// client.SubscribeAllTracks()
 
 	client.OnTracksAdded(func(tracks []sfu.ITrack) {
-
-		fmt.Println("on Tracks added called in client!!!")
-
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
