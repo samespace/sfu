@@ -19,7 +19,6 @@ import (
 	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
-	"github.com/samespace/sfu/processing"
 	"golang.org/x/net/websocket"
 )
 
@@ -73,9 +72,6 @@ var logger logging.LeveledLogger
 func main() {
 
 	var err error
-
-	err = processing.ProcessRoom("iF7nXzvHPntC155l")
-	fmt.Println(err)
 
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")

@@ -111,11 +111,14 @@ func addSilence(tracks []clientTrack, offsets map[string]float32) {
 		input := t.TrackFileName
 		out := t.TrackFileName
 		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
-			out = strings.Replace(input, n, "offset.wav", 1)
+			out = strings.ReplaceAll(input, n, "offset.wav")
+		}
+		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
+			input = strings.ReplaceAll(input, n, "audio.wav")
 		}
 		err := addAudioSilence(input, out, offsets[t.TrackID])
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("err adding audio silence: %w", err)
 		}
 	}
 }
