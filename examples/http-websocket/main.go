@@ -19,7 +19,6 @@ import (
 	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
-	"github.com/samespace/sfu/processing"
 	"golang.org/x/net/websocket"
 )
 
@@ -76,7 +75,7 @@ func main() {
 
 	var err error
 
-	fmt.Println(processing.ProcessRoom("OdA8KaFOKTGcXZB8"))
+	//fmt.Println(processing.ProcessRoom("OdA8KaFOKTGcXZB8"))
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
