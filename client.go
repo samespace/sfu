@@ -1013,6 +1013,21 @@ func (c *Client) ToggleRecord(shouldRecord bool) {
 	}
 }
 
+func (c *Client) TogglePause(shouldPause bool) {
+	for _, t := range c.tracks.GetTracks() {
+		r, err := c.getOrCreateTrackRecorder(t.ID())
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		if shouldPause {
+			r.Pause()
+		} else {
+			r.Continue()
+		}
+	}
+}
+
 func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
 	rec, err := c.getOrCreateTrackRecorder(trackID)
 	if err != nil {

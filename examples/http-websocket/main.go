@@ -19,6 +19,7 @@ import (
 	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
+	"github.com/samespace/sfu/processing"
 	"golang.org/x/net/websocket"
 )
 
@@ -65,6 +66,8 @@ const (
 	TypeBitrateAdjusted      = "bitrate_adjusted"
 	TypeTrackStats           = "track_stats"
 	TypeVoiceDetected        = "voice_detected"
+	TypeToggleRecording      = "toggle_recording"
+	TypeTogglePause          = "toggle_pause"
 )
 
 var logger logging.LeveledLogger
@@ -73,6 +76,7 @@ func main() {
 
 	var err error
 
+	fmt.Println(processing.ProcessRoom("OdA8KaFOKTGcXZB8"))
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
@@ -111,7 +115,7 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
-	roomsOpts.AutoEnableRecording = true
+	roomsOpts.AutoEnableRecording = false
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
@@ -505,7 +509,12 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				respBytes, _ := json.Marshal(resp)
 
 				conn.Write(respBytes)
-
+			} else if req.Type == TypeToggleRecording {
+				state := req.Data.(bool)
+				client.ToggleRecord(state)
+			} else if req.Type == TypeTogglePause {
+				state := req.Data.(bool)
+				client.TogglePause(state)
 			} else {
 				logger.Errorf("unknown message type", req)
 			}

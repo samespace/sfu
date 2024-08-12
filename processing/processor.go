@@ -108,15 +108,15 @@ func mergeTracks(room roomData) error {
 
 func addSilence(tracks []clientTrack, offsets map[string]float32) {
 	for _, t := range tracks {
-		input := t.TrackFileName
+		in := t.TrackFileName
 		out := t.TrackFileName
 		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
-			out = strings.ReplaceAll(input, n, "offset.wav")
+			out = strings.ReplaceAll(out, n, "offset.wav")
 		}
 		for _, n := range []string{"audio.pcma", "audio.pcmu", "audio.opus"} {
-			input = strings.ReplaceAll(input, n, "audio.wav")
+			in = strings.ReplaceAll(in, n, "audio.wav")
 		}
-		err := addAudioSilence(input, out, offsets[t.TrackID])
+		err := addAudioSilence(in, out, offsets[t.TrackID])
 		if err != nil {
 			fmt.Println("err adding audio silence: %w", err)
 		}

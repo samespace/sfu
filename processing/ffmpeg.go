@@ -54,11 +54,11 @@ func pcmToLPcm(audioType audioType, src, dst string) error {
 func addAudioSilence(in, out string, duration float32) error {
 	dur := fmt.Sprintf("%.2f", duration/1000)
 	var cmd *exec.Cmd
-
 	if dur == "0.00" {
 		cmd = exec.Command(
 			"ffmpeg",
 			"-i", in,
+			"-c", "copy",
 			out,
 		)
 	} else {

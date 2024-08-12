@@ -117,6 +117,8 @@
         import { InliveVideoObserver } from './inlive-video-observer.js'
         let clientid = null
         let isRecording = false
+        let isPaused = false
+
         const peerConnection = new RTCPeerConnection({
             iceServers: [
                 {
@@ -1031,6 +1033,14 @@
 
         const toggleRecording = () => {
             ws.send(JSON.stringify({ type: "toggle_recording", data: !isRecording }))
+            isRecording = !isRecording
+            document.getElementById("btnToggleRecording").innerHTML = isRecording ? "Stop Recording" : "Start Recording";
+        }
+
+        const togglePause = () => {
+            ws.send(JSON.stringify({ type: "toggle_pause", data: !isPaused }))
+            document.getElementById("btnPauseRecording").innerHTML = isPaused ? "Continue recording" : "Pause Recording";
+            isPaused = !isPaused
         }
 
         document.addEventListener("DOMContentLoaded", function (event) {
@@ -1041,6 +1051,7 @@
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("btnToggleRecording").onclick = toggleRecording;
+            document.getElementById("btnPauseRecording").onclick = togglePause;
             document.getElementById("selectQuality").onchange = switchQuality;
         });
     </script>
@@ -1065,6 +1076,7 @@
         <button id="btnToggleMic">Mute Mic</button>
         <button id="btnToggleCam">Mute Cam</button>
         <button id="btnToggleRecording">Start Recording</button>
+        <button id="btnPauseRecording">Pause Recording</button>
         <span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
         <span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>
