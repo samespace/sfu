@@ -26,7 +26,6 @@ func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
 	if rec, ok := c.recorders.Load(trackID); ok {
 		return rec, nil
 	}
-
 	track, err := c.tracks.Get(trackID)
 	if err != nil {
 		return nil, fmt.Errorf("track not found in client tracks: %w", err)
@@ -34,12 +33,10 @@ func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
 	if track.Kind() != webrtc.RTPCodecTypeAudio {
 		return nil, ErrOnlyAudioSupported
 	}
-
 	dir, err := c.createRecordingDirectory(trackID)
 	if err != nil {
 		return nil, err
 	}
-
 	file, err := os.Create(fmt.Sprintf("%s/audio.%s", dir, c.getTrackExtension(track.MimeType())))
 	if err != nil {
 		return nil, fmt.Errorf("error creating file: %v", err)
@@ -57,6 +54,11 @@ func (c *Client) getOrCreateTrackRecorder(trackID string) (Recorder, error) {
 	}
 	c.recorders.Store(trackID, recorder)
 	c.setupTrackRemovalHandler(trackID, track, recorder, writer)
+	if err := writeRecordingMetadata(
+		fmt.Sprintf("%s/meta.json", dir),
+	); err != nil {
+		return nil, fmt.Errorf("err writing file : %w", err)
+	}
 	return recorder, nil
 }
 

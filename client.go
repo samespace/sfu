@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -352,9 +351,8 @@ func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuratio
 	}
 
 	client.onTrack = func(track ITrack) {
-
 		if assertAudioMimeType(track.MimeType()) && client.options.AutoStartRecording {
-			err := client.startTrackRecord(track)
+			err := client.startTrackRecord(track.ID())
 			if err != nil {
 				fmt.Println(err)
 			}
@@ -404,11 +402,8 @@ func NewClient(s *SFU, id, name string, peerConnectionConfig webrtc.Configuratio
 	client.internalDataChannel = internalDataChannel
 
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
-
 		client.log.Infof("client: connection state changed ", connectionState.String())
-
 		client.onConnectionStateChanged(connectionState)
-
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
 			if client.state.Load() == ClientStateNew {
@@ -1000,45 +995,41 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 	}
 }
 
+func (c *Client) ToggleRecord(shouldRecord bool) {
+	for _, t := range c.tracks.GetTracks() {
+		r, err := c.getOrCreateTrackRecorder(t.ID())
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		if shouldRecord {
+			err = r.Start()
+		} else {
+			err = r.Stop()
+		}
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
+}
+
 func (c *Client) ToggleTrackRecord(trackID string, shouldRecord bool) error {
-	trackRecorder, err := c.getOrCreateTrackRecorder(trackID)
+	rec, err := c.getOrCreateTrackRecorder(trackID)
 	if err != nil {
 		return err
 	}
 	if shouldRecord {
-		return trackRecorder.Start()
+		return rec.Start()
 	}
-	return trackRecorder.Stop()
+	return rec.Stop()
 }
 
-func (c *Client) startTrackRecord(track ITrack) error {
-	dir, err := c.createRecordingDirectory(track.ID())
+func (c *Client) startTrackRecord(trackID string) error {
+	rec, err := c.getOrCreateTrackRecorder(trackID)
 	if err != nil {
 		return err
 	}
-
-	file, err := os.Create(fmt.Sprintf("%s/audio.%s", dir, c.getTrackExtension(track.MimeType())))
-	if err != nil {
-		return fmt.Errorf("error creating file: %v", err)
-	}
-
-	writer := NewChunkWriter(bufferDuration, func(chunk Chunk) {
-		if _, err := file.Write(chunk); err != nil {
-			fmt.Printf("error writing chunk: %v", err)
-		}
-	})
-
-	recorder, err := c.createRecorderByMimeType(track, writer)
-	if err != nil {
-		return fmt.Errorf("error creating recorder: %v", err)
-	}
-	c.recorders.Store(track.ID(), recorder)
-	c.setupTrackRemovalHandler(track.ID(), track, recorder, writer)
-	go writeRecordingMetadata(
-		fmt.Sprintf("%s/meta.json", dir),
-	)
-	recorder.Start()
-	return nil
+	return rec.Start()
 }
 
 func (c *Client) PauseRecorder(trackID string, shouldRecord bool) error {
