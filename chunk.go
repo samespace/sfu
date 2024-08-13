@@ -39,6 +39,7 @@ func (cw *ChunkWriter) start() {
 		case <-cw.ticker.C:
 			cw.flush()
 		case <-cw.stopChan:
+			cw.flush()
 			cw.ticker.Stop()
 			return
 		}
