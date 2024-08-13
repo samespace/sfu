@@ -11,8 +11,8 @@ x``
 ffmpeg -f lavfi -t 4.234 -i anullsrc=r=8000:cl=mono -i audio.wav -filter_complex "[0] [1] concat=n=2:v=0:a=1 [a]" -map "[a]" silenced.wav
 */
 
-func ProcessRoom(roomId string) error {
-	room, err := readRoom(roomId)
+func ProcessRoom(recDir, roomId string) error {
+	room, err := readRoom(recDir, roomId)
 	if err != nil {
 		return fmt.Errorf("failed to read room: %w", err)
 	}
@@ -23,7 +23,7 @@ func ProcessRoom(roomId string) error {
 		}
 	}
 
-	if err = mergeTracks(*room); err != nil {
+	if err = mergeTracks(recDir, *room); err != nil {
 		return err
 	}
 
@@ -68,7 +68,7 @@ func convertTracks(tracks []clientTrack) error {
 	return nil
 }
 
-func mergeTracks(room roomData) error {
+func mergeTracks(recDir string, room roomData) error {
 	var tracks = getRoomTracks(room)
 	var earliestTimestamp time.Time
 	var trackOffsets = make(map[string]float32)
@@ -97,7 +97,7 @@ func mergeTracks(room roomData) error {
 		}
 		mixInputs = append(mixInputs, in)
 	}
-	err := mixAudio(mixInputs, fmt.Sprintf("recordings/%s/merged.wav", room.RoomId))
+	err := mixAudio(mixInputs, fmt.Sprintf("%s/%s/merged.wav", recDir, room.RoomId))
 
 	if err != nil {
 		return err

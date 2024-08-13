@@ -63,8 +63,8 @@ func readMetadata(filePath string) (*RecordMetadata, error) {
 }
 
 // readRoom processes the room directory to extract roomData.
-func readRoom(roomId string) (*roomData, error) {
-	roomDir := filepath.Join("recordings", roomId)
+func readRoom(recDir, roomId string) (*roomData, error) {
+	roomDir := filepath.Join(recDir, roomId)
 	if _, err := os.Stat(roomDir); os.IsNotExist(err) {
 		return nil, fmt.Errorf("room directory does not exist: %s", roomDir)
 	}

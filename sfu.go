@@ -106,6 +106,7 @@ func (s *SFUClients) Remove(client *Client) error {
 
 type SFU struct {
 	roomId                    string
+	recordingDirectory        string
 	bitrateConfigs            BitrateConfigs
 	clients                   *SFUClients
 	context                   context.Context
@@ -132,13 +133,14 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers     []webrtc.ICEServer
-	Bitrates       BitrateConfigs
-	QualityPresets QualityPresets
-	Codecs         []string
-	PLIInterval    time.Duration
-	Log            logging.LeveledLogger
-	SettingEngine  *webrtc.SettingEngine
+	IceServers         []webrtc.ICEServer
+	Bitrates           BitrateConfigs
+	QualityPresets     QualityPresets
+	Codecs             []string
+	PLIInterval        time.Duration
+	Log                logging.LeveledLogger
+	SettingEngine      *webrtc.SettingEngine
+	recordingDirectory string
 }
 
 // @Param muxPort: port for udp mux
@@ -147,6 +149,7 @@ func New(roomId string, ctx context.Context, opts sfuOptions) *SFU {
 
 	sfu := &SFU{
 		roomId:                    roomId,
+		recordingDirectory:        opts.recordingDirectory,
 		clients:                   &SFUClients{clients: make(map[string]*Client), mu: sync.Mutex{}},
 		context:                   localCtx,
 		cancel:                    cancel,

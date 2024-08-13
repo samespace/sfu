@@ -76,7 +76,7 @@ func (c *Client) createRecorderByMimeType(track ITrack, writer *ChunkWriter) (Re
 }
 
 func (c *Client) createRecordingDirectory(trackID string) (string, error) {
-	dir := fmt.Sprintf("recordings/%s/%s/%s", c.roomId, c.id, trackID)
+	dir := fmt.Sprintf("%s/%s/%s/%s", c.sfu.recordingDirectory, c.roomId, c.id, trackID)
 	if err := ensureDir(dir); err != nil {
 		return "", fmt.Errorf("unable to create recording directory: %w", err)
 	}

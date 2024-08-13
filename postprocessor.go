@@ -21,5 +21,5 @@ func (r *RecorderExtention) OnNewRoom(manager *Manager, room *Room) {
 }
 
 func (r *RecorderExtention) OnRoomClosed(manager *Manager, room *Room) {
-	go processing.ProcessRoom(room.id)
+	go processing.ProcessRoom(room.sfu.recordingDirectory, room.id)
 }

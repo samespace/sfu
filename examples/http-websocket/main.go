@@ -92,6 +92,7 @@ func main() {
 
 	defer cancel()
 	sfuOpts := sfu.DefaultOptions()
+	sfuOpts.RecordingDir = "new_rec_dir"
 
 	sfuOpts.EnableBandwidthEstimator = true
 	fakeClientCount := 0

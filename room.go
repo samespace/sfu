@@ -15,6 +15,10 @@ const (
 	EventRoomClientLeft = "room_client_left"
 )
 
+const (
+	DefaultRecordingDirectory = "recordings"
+)
+
 type Options struct {
 	EnableBridging           bool
 	EnableBandwidthEstimator bool
@@ -22,6 +26,7 @@ type Options struct {
 	MinPlayoutDelay          uint16
 	MaxPlayoutDelay          uint16
 	SettingEngine            *webrtc.SettingEngine
+	RecordingDir             string
 }
 
 func DefaultOptions() Options {
@@ -39,6 +44,7 @@ func DefaultOptions() Options {
 		MinPlayoutDelay: 100,
 		MaxPlayoutDelay: 100,
 		SettingEngine:   settingEngine,
+		RecordingDir:    DefaultRecordingDirectory,
 	}
 }
 
