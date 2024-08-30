@@ -12,29 +12,45 @@ require (
 )
 
 require (
+<<<<<<< HEAD
 	github.com/jaevor/go-nanoid v1.4.0
 	github.com/pion/ice/v3 v3.0.13
 	github.com/pion/turn/v3 v3.0.3
 	github.com/pion/webrtc/v4 v4.0.0-beta.26
 	github.com/quic-go/quic-go v0.46.0
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
+=======
+	github.com/jaevor/go-nanoid v1.3.0
+	github.com/pion/ice/v3 v3.0.16
+	github.com/pion/turn/v3 v3.0.3
+	github.com/pion/webrtc/v4 v4.0.0-beta.27
+	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 	golang.org/x/text v0.16.0
 )
 
 require (
+<<<<<<< HEAD
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/google/pprof v0.0.0-20210407192527-94a9f03dee38 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.5 // indirect
+=======
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 	github.com/pion/dtls/v3 v3.0.0 // indirect
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/srtp/v3 v3.0.3 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
+<<<<<<< HEAD
 	github.com/pion/transport/v3 v3.0.6 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/mod v0.19.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/tools v0.23.0 // indirect
+=======
+	github.com/pion/transport/v3 v3.0.7 // indirect
+	github.com/wlynxg/anet v0.0.3 // indirect
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
@@ -45,10 +61,14 @@ require (
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/logging v0.2.2
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtp v1.8.7
-	github.com/pion/sctp v1.8.19 // indirect
+	github.com/pion/rtp v1.8.8
+	github.com/pion/sctp v1.8.20 // indirect
 	github.com/pion/sdp/v3 v3.0.9
+<<<<<<< HEAD
 	github.com/pion/transport/v2 v2.2.9 // indirect
+=======
+	github.com/pion/transport/v2 v2.2.8 // indirect
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/crypto v0.25.0 // indirect
 	golang.org/x/net v0.27.0 // direct

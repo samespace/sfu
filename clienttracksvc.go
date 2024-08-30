@@ -16,6 +16,49 @@ type QualityPreset struct {
 	TID uint8 `json:"tid" example:"2"`
 }
 
+var DefaultQualityPresets = map[QualityLevel]QualityPreset{
+	QualityHigh: QualityPreset{
+		SID: 2,
+		TID: 2,
+	},
+	QualityHighMid: QualityPreset{
+		SID: 2,
+		TID: 1,
+	},
+	QualityHighLow: QualityPreset{
+		SID: 2,
+		TID: 0,
+	},
+	QualityMid: QualityPreset{
+		SID: 1,
+		TID: 2,
+	},
+	QualityMidMid: QualityPreset{
+		SID: 1,
+		TID: 1,
+	},
+	QualityMidLow: QualityPreset{
+		SID: 1,
+		TID: 0,
+	},
+	QualityLow: QualityPreset{
+		SID: 0,
+		TID: 2,
+	},
+	QualityLowMid: QualityPreset{
+		SID: 0,
+		TID: 1,
+	},
+	QualityLowLow: QualityPreset{
+		SID: 0,
+		TID: 0,
+	},
+	QualityNone: QualityPreset{
+		SID: 0,
+		TID: 0,
+	},
+}
+
 func (q QualityPreset) GetSID() uint8 {
 	return q.SID
 }
@@ -25,56 +68,50 @@ func (q QualityPreset) GetTID() uint8 {
 }
 
 type QualityPresets struct {
-	High QualityPreset `json:"high"`
-	Mid  QualityPreset `json:"mid"`
-	Low  QualityPreset `json:"low"`
+	High    QualityPreset `json:"high"`
+	HighMid QualityPreset `json:"highmid"`
+	HighLow QualityPreset `json:"highlow"`
+	Mid     QualityPreset `json:"mid"`
+	MidMid  QualityPreset `json:"midmid"`
+	MidLow  QualityPreset `json:"midlow"`
+	Low     QualityPreset `json:"low"`
+	LowMid  QualityPreset `json:"lowmid"`
+	LowLow  QualityPreset `json:"lowlow"`
 }
 
-func DefaultQualityPresets() *QualityPresets {
-	return &QualityPresets{
-		High: QualityPreset{
-			SID: 2,
-			TID: 2,
-		},
-		Mid: QualityPreset{
-			SID: 1,
-			TID: 1,
-		},
-		Low: QualityPreset{
-			SID: 0,
-			TID: 0,
-		},
+func DefaultQualityLevels() []QualityLevel {
+	return []QualityLevel{
+		QualityHigh,
+		QualityMid,
+		QualityLow,
+		QualityLowMid,
+		QualityLowLow,
 	}
 }
 
 type scaleableClientTrack struct {
 	*clientTrack
-	lastQuality    QualityLevel
-	maxQuality     QualityLevel
-	tid            uint8
-	sid            uint8
-	lastTimestamp  uint32
-	lastSequence   uint16
-	qualityPresets QualityPresets
-	init           bool
-	packetmap      *packetmap.Map
+	lastQuality   QualityLevel
+	maxQuality    QualityLevel
+	tid           uint8
+	sid           uint8
+	lastTimestamp uint32
+	lastSequence  uint16
+	init          bool
 }
 
 func newScaleableClientTrack(
 	c *Client,
 	t *Track,
-	qualityPresets QualityPresets,
 ) *scaleableClientTrack {
 
 	sct := &scaleableClientTrack{
-		clientTrack:    newClientTrack(c, t, false, nil),
-		qualityPresets: qualityPresets,
-		maxQuality:     QualityHigh,
-		lastQuality:    QualityHigh,
-		tid:            qualityPresets.High.TID,
-		sid:            qualityPresets.High.SID,
-		packetmap:      &packetmap.Map{},
+		clientTrack: newClientTrack(c, t, false, nil),
+		maxQuality:  QualityHigh,
+		lastQuality: QualityHigh,
 	}
+
+	sct.SetMaxQuality(QualityHigh)
 
 	return sct
 }
@@ -98,10 +135,18 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	return (vp9.Payload[0]&0x6) == 0 && true
 }
 
-func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	var qualityPreset IQualityPreset
+func (t *scaleableClientTrack) getQuality() QualityLevel {
+	claim := t.client.bitrateController.GetClaim(t.ID())
 
-	var isLatePacket bool
+	if claim == nil {
+		t.client.log.Warnf("scalabletrack: claim is nil")
+		return QualityNone
+	}
+
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
+func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
@@ -111,22 +156,8 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	quality := t.getQuality()
-	if quality == QualityNone {
-		// TODO: need to do if
-		// _ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 
-		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
-		// return
-	}
-
-	switch quality {
-	case QualityHigh:
-		qualityPreset = t.qualityPresets.High
-	case QualityMid:
-		qualityPreset = t.qualityPresets.Mid
-	default:
-		qualityPreset = t.qualityPresets.Low
-	}
+	qualityPreset := qualityLevelToPreset(quality)
 
 	targetSID := qualityPreset.GetSID()
 	targetTID := qualityPreset.GetTID()
@@ -135,8 +166,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.init = true
 		t.sid = targetSID
 		t.tid = targetTID
-	} else {
-		isLatePacket = IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
 	}
 
 	t.lastSequence = p.Header.SequenceNumber
@@ -145,13 +174,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	currentSID := t.sid
 
 	// check if possible to scale up/down temporal layer
-	if t.tid < targetTID && !isLatePacket {
+	if t.tid < targetTID {
 		if vp9Packet.U && vp9Packet.B && currentTID < vp9Packet.TID && vp9Packet.TID <= targetTID {
 			// scale temporal up
 			t.tid = vp9Packet.TID
 			currentTID = t.tid
 		}
-	} else if t.tid > targetTID && !isLatePacket {
+	} else if t.tid > targetTID {
 		if vp9Packet.E {
 			// scale temporal down
 			t.tid = vp9Packet.TID
@@ -160,13 +189,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	// check if possible to scale up spatial layer
 
-	if currentSID < targetSID && !isLatePacket {
+	if currentSID < targetSID {
 		if !vp9Packet.P && vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID {
 			// scale spatial up
 			t.sid = vp9Packet.SID
 			currentSID = t.sid
 		}
-	} else if currentSID > targetSID && !isLatePacket {
+	} else if currentSID > targetSID {
 		if vp9Packet.E {
 			// scale spatsial down
 			t.sid = vp9Packet.SID
@@ -177,14 +206,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.setLastQuality(quality)
 	}
 
-	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
+	sidNonReference := (p.Payload[0] & 0x01) != 0
+	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID || (vp9Packet.SID > currentSID && sidNonReference) {
 		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
 		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 		if ok {
 			return
 		}
-		t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " cannot be dropped")
-
 	}
 
 	// mark packet as a last spatial layer packet
@@ -192,12 +220,33 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
+	ok, newseqno, piddelta := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
 	if !ok {
 		return
 	}
 
+	marker := (p.Payload[1] & 0x80) != 0
+	if marker && newseqno == p.SequenceNumber && piddelta == 0 {
+		t.send(p)
+		return
+	}
+
+	if marker {
+		p.Payload[1] |= 0x80
+	}
+
 	p.SequenceNumber = newseqno
+
+	// if quality is none we need to send blank frame
+	// make sure the player is paused when the quality is none.
+	// quality none only possible when the video is not displayed
+	if quality == QualityNone {
+		if ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID); ok {
+			return
+		}
+
+		p.Payload = p.Payload[:0]
+	}
 
 	t.send(p)
 }
@@ -224,6 +273,10 @@ func (t *scaleableClientTrack) setLastQuality(quality QualityLevel) {
 	t.lastQuality = quality
 }
 
+func (t *scaleableClientTrack) Quality() QualityLevel {
+	return t.LastQuality()
+}
+
 func (t *scaleableClientTrack) LastQuality() QualityLevel {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -234,6 +287,13 @@ func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.mu.Lock()
 	t.maxQuality = quality
 	t.mu.Unlock()
+
+	claim := t.Client().bitrateController.GetClaim(t.ID())
+	if claim != nil {
+		if claim.Quality() > quality && quality != QualityNone {
+			claim.SetQuality(quality)
+		}
+	}
 
 	t.RequestPLI()
 }
@@ -255,15 +315,4 @@ func (t *scaleableClientTrack) IsScaleable() bool {
 
 func (t *scaleableClientTrack) RequestPLI() {
 	go t.remoteTrack.sendPLI()
-}
-
-func (t *scaleableClientTrack) getQuality() QualityLevel {
-	claim := t.client.bitrateController.GetClaim(t.ID())
-
-	if claim == nil {
-		t.client.log.Warnf("scalabletrack: claim is nil")
-		return QualityNone
-	}
-
-	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 }

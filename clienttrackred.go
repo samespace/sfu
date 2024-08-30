@@ -14,27 +14,12 @@ var (
 )
 
 type clientTrackRed struct {
-	*clientTrack
-	isReceiveRed bool
+	*clientTrackAudio
 }
 
-func newClientTrackRed(c *Client, t *Track) *clientTrackRed {
-	var localTrack *webrtc.TrackLocalStaticRTP
-	mimeType := t.remoteTrack.track.Codec().MimeType
-
-	if !c.receiveRED {
-		mimeType = webrtc.MimeTypeOpus
-		localTrack = t.createOpusLocalTrack()
-	} else {
-		localTrack = t.createLocalTrack()
-	}
-
-	ctBase := newClientTrack(c, t, false, localTrack)
-	ctBase.mimeType = mimeType
-
+func newClientTrackRed(t *clientTrackAudio) *clientTrackRed {
 	ct := &clientTrackRed{
-		clientTrack:  ctBase,
-		isReceiveRed: c.receiveRED,
+		clientTrackAudio: t,
 	}
 
 	return ct
@@ -45,26 +30,25 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	if !t.isReceiveRed {
+	if !t.client.receiveRED {
 		primaryPacket := t.remoteTrack.rtppool.GetPacket()
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
 		primaryPacket.Header = p.Header
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
-			t.client.log.Errorf("clienttrack: error on write primary rtp", err)
+			t.client.log.Tracef("clienttrack: error on write primary rtp %s", err.Error())
 		}
 		t.remoteTrack.rtppool.PutPacket(primaryPacket)
-		return
-	}
-
-	if err := t.localTrack.WriteRTP(p); err != nil {
-		t.client.log.Errorf("clienttrack: error on write rtp", err)
+	} else {
+		if err := t.localTrack.WriteRTP(p); err != nil {
+			t.client.log.Tracef("clienttrack: error on write rtp %s", err.Error())
+		}
 	}
 }
 
 func (t *clientTrackRed) getPrimaryEncoding(payload []byte) []byte {
 	primaryPayload, err := extractPrimaryEncodingForRED(payload)
 	if err != nil {
-		t.client.log.Errorf("clienttrack: error on extract primary encoding for red", err)
+		t.client.log.Tracef("clienttrack: error on extract primary encoding for red %s", err.Error())
 		return payload
 	}
 
@@ -116,5 +100,10 @@ func extractPrimaryEncodingForRED(payload []byte) ([]byte, error) {
 }
 
 func (t *clientTrackRed) Quality() QualityLevel {
+	return QualityAudioRed
+}
+
+func (t *clientTrackRed) MaxQuality() QualityLevel {
+
 	return QualityAudioRed
 }

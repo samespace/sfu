@@ -41,11 +41,17 @@ const (
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
 
-	QualityAudioRed = 5
-	QualityAudio    = 4
-	QualityHigh     = 3
-	QualityMid      = 2
-	QualityLow      = 1
+	QualityAudioRed = 11
+	QualityAudio    = 10
+	QualityHigh     = 9
+	QualityHighMid  = 8
+	QualityHighLow  = 7
+	QualityMid      = 6
+	QualityMidMid   = 5
+	QualityMidLow   = 4
+	QualityLow      = 3
+	QualityLowMid   = 2
+	QualityLowLow   = 1
 	QualityNone     = 0
 
 	messageTypeVideoSize  = "video_size"
@@ -87,8 +93,12 @@ type ClientOptions struct {
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
+<<<<<<< HEAD
 	QuicConnection quic.Connection `json:"-"`
 	QuicConfig     []*recorder.QuicConfig
+=======
+	qualityLevels  []QualityLevel
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 }
 
 type internalDataMessage struct {
@@ -144,7 +154,7 @@ type Client struct {
 	isInRemoteNegotiation *atomic.Bool
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
-	mu                    sync.RWMutex
+	mu                    sync.Mutex
 	peerConnection        *PeerConnection
 	quicClient            quic.Connection
 	isMuted               *atomic.Bool
@@ -163,10 +173,10 @@ type Client struct {
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	onJoinedCallbacks                 []func()
 	onLeftCallbacks                   []func()
-	onVoiceDetectedCallbacks          []func(voiceactivedetector.VoiceActivity)
+	onVoiceSentDetectedCallbacks      []func(voiceactivedetector.VoiceActivity)
+	onVoiceReceivedDetectedCallbacks  []func(voiceactivedetector.VoiceActivity)
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	onIceCandidate                    func(context.Context, *webrtc.ICECandidate)
-	onBeforeRenegotiation             func(context.Context) bool
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	onAllowedRemoteRenegotiation      func()
 	onTracksAvailableCallbacks        []func([]ITrack)
@@ -188,6 +198,7 @@ type Client struct {
 	ingressQualityLimitationReason *atomic.Value
 	isDebug                        bool
 	vadInterceptor                 *voiceactivedetector.Interceptor
+	vads                           map[uint32]*voiceactivedetector.VoiceDetector
 	log                            logging.LeveledLogger
 }
 
@@ -204,6 +215,7 @@ func DefaultClientOptions() ClientOptions {
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		ReorderPackets:       false,
+		Log:                  logging.NewDefaultLoggerFactory().NewLogger("sfu"),
 	}
 }
 
@@ -243,6 +255,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	i.Add(statsInterceptorFactory)
 
+	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
+
 	if opts.EnableVoiceDetection {
 		opts.Log.Infof("client: voice detection is enabled")
 		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, opts.Log)
@@ -251,13 +265,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
 			vadInterceptor = i
 			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
-				opts.Log.Infof("track: voice activity detector enabled")
-				vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
-					// send through datachannel
-					if client != nil {
-						client.onVoiceDetected(activity)
-					}
-				})
+				vads[vad.SSRC()] = vad
 			})
 		})
 
@@ -316,7 +324,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	stateNew.Store(ClientStateNew)
 
 	var quality atomic.Uint32
+
 	quality.Store(QualityHigh)
+
 	client = &Client{
 		id:                             id,
 		name:                           name,
@@ -327,7 +337,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRenegotiation:              &atomic.Bool{},
 		isInRemoteNegotiation:          &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(localCtx),
-		mu:                             sync.RWMutex{},
+		mu:                             sync.Mutex{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		isMuted:                        &atomic.Bool{},
@@ -347,6 +357,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		ingressQualityLimitationReason: &atomic.Value{},
 		onTracksAvailableCallbacks:     make([]func([]ITrack), 0),
 		vadInterceptor:                 vadInterceptor,
+		vads:                           vads,
 		log:                            opts.Log,
 	}
 
@@ -456,7 +467,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.stats = newClientStats(client)
 
-	client.bitrateController = newbitrateController(client)
+	client.bitrateController = newbitrateController(client, opts.qualityLevels)
 
 	go func() {
 		estimator := <-estimatorChan
@@ -464,8 +475,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		defer client.mu.Unlock()
 
 		client.estimator = estimator
-
-		client.bitrateController.MonitorBandwidth(estimator)
 	}()
 
 	// Set a handler for when a new remote track starts, this just distributes all our packets
@@ -512,6 +521,27 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})
 			})
+
+			if opts.EnableVoiceDetection && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+				vad, ok := vads[uint32(remoteTrack.SSRC())]
+				if ok {
+					audioTrack := track.(*AudioTrack)
+					audioTrack.SetVAD(vad)
+					audioTrack.OnVoiceDetected(func(pkts []voiceactivedetector.VoicePacketData) {
+						activity := voiceactivedetector.VoiceActivity{
+							TrackID:     track.ID(),
+							StreamID:    track.StreamID(),
+							SSRC:        uint32(audioTrack.SSRC()),
+							ClockRate:   audioTrack.base.codec.ClockRate,
+							AudioLevels: pkts,
+						}
+
+						client.onVoiceReceiveDetected(activity)
+					})
+				} else {
+					client.log.Errorf("client: error voice detector not found")
+				}
+			}
 
 			if err := client.tracks.Add(track); err != nil {
 				client.log.Errorf("client: error add track ", err)
@@ -717,9 +747,6 @@ func (c *Client) ID() string {
 }
 
 func (c *Client) Name() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	return c.name
 }
 
@@ -731,8 +758,8 @@ func (c *Client) Context() context.Context {
 // If the event is not listened, the pending published tracks will be ignored and not published to other clients.
 // Once received, respond with `client.SetTracksSourceType()“ to confirm the source type of the pending published tracks
 func (c *Client) OnTracksAdded(callback func(addedTracks []ITrack)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onTracksAdded = callback
 }
@@ -932,22 +959,12 @@ func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescrip
 	return sdp
 }
 
-// OnBeforeRenegotiation event is called before the SFU is trying to renegotiate with the client.
-// The client must be listen for this event and set the callback to return true if the client is ready to renegotiate
-// and no current negotiation is in progress from the client.
-func (c *Client) OnBeforeRenegotiation(callback func(context.Context) bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.onBeforeRenegotiation = callback
-}
-
 // OnRenegotiation event is called when the SFU is trying to renegotiate with the client.
 // The callback will receive the SDP offer from the SFU that must be use to create the SDP answer from the client.
 // The SDP answer then can be passed back to the SFU using `client.CompleteNegotiation()` method.
 func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onRenegotiation = callback
 }
@@ -955,15 +972,12 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 func (c *Client) renegotiate() {
 	c.log.Debug("client: renegotiate")
 	c.negotiationNeeded.Store(true)
-	c.mu.Lock()
+
 	if c.onRenegotiation == nil {
 		c.log.Errorf("client: onRenegotiation is not set, can't do renegotiation")
-		c.mu.Unlock()
 
 		return
 	}
-
-	c.mu.Unlock()
 
 	if c.isInRemoteNegotiation.Load() {
 		c.log.Infof("sfu: renegotiation is delayed because the remote client %s is doing negotiation ", c.ID)
@@ -1055,8 +1069,8 @@ func (c *Client) renegotiate() {
 // and ready to receive the renegotiation from the client.
 // Use this event to trigger the client to do renegotiation if needed.
 func (c *Client) OnAllowedRemoteRenegotiation(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onAllowedRemoteRenegotiation = callback
 }
@@ -1082,8 +1096,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		outputTrack = simulcastTrack.subscribe(c)
 
 	} else {
-		singleTrack := t.(*Track)
-		outputTrack = singleTrack.subscribe(c)
+		if t.Kind() == webrtc.RTPCodecTypeAudio {
+			singleTrack := t.(*AudioTrack)
+			outputTrack = singleTrack.subscribe(c)
+		} else {
+			singleTrack := t.(*Track)
+			outputTrack = singleTrack.subscribe(c)
+		}
+
 	}
 
 	localTrack := outputTrack.LocalTrack()
@@ -1092,14 +1112,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	if err != nil {
 		c.log.Errorf("client: error on adding track ", err)
 		return nil
-	}
-
-	if t.Kind() == webrtc.RTPCodecTypeAudio {
-		if c.IsVADEnabled() {
-			c.log.Infof("track: voice activity detector enabled")
-			ssrc := senderTcv.Sender().GetParameters().Encodings[0].SSRC
-			c.vadInterceptor.MapAudioTrack(uint32(ssrc), localTrack)
-		}
 	}
 
 	// TODO: change to non goroutine
@@ -1152,16 +1164,20 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 	ssrc := rtpSender.GetParameters().Encodings[0].SSRC
 	go func() {
 		localCtx, cancel := context.WithCancel(track.Context())
-
 		defer cancel()
+
+		clientCtx, cancelClientCtx := context.WithCancel(c.context)
+		defer cancelClientCtx()
 
 		for {
 			select {
+			case <-clientCtx.Done():
+				return
 			case <-localCtx.Done():
 				return
 			default:
 				rtcpPackets, _, err := rtpSender.ReadRTCP()
-				if err != nil && err == io.ErrClosedPipe {
+				if err != nil && (err == io.EOF || err == io.ErrClosedPipe) {
 					return
 				}
 
@@ -1183,8 +1199,14 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 		defer tick.Stop()
 
 		defer cancel()
+
+		clientCtx, cancelClientCtx := context.WithCancel(c.context)
+		defer cancelClientCtx()
+
 		for {
 			select {
+			case <-clientCtx.Done():
+				return
 			case <-localCtx.Done():
 				return
 			case <-tick.C:
@@ -1210,6 +1232,7 @@ func (c *Client) afterClosed() {
 	c.mu.Lock()
 	state := c.state.Load()
 	if state == ClientStateEnded {
+		c.mu.Unlock()
 		return
 	}
 	c.mu.Unlock()
@@ -1245,20 +1268,14 @@ func (c *Client) stop() error {
 	return nil
 }
 
-// End will wait until the client is completely stopped
-func (c *Client) End() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// End the client connection and clean up the resources.
+func (c *Client) End() error {
+	err := c.stop()
+	if err != nil {
+		c.log.Errorf("client: error stop client %s", err.Error())
+	}
 
-	removed := make(chan bool)
-
-	c.sfu.OnClientRemoved(func(removedClient *Client) {
-		if removedClient.ID() == c.ID() {
-			removed <- true
-		}
-	})
-
-	<-removed
+	return err
 }
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
@@ -1320,8 +1337,8 @@ func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
 }
 
 func (c *Client) onJoined() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	for _, callback := range c.onJoinedCallbacks {
 		callback()
@@ -1332,8 +1349,8 @@ func (c *Client) onJoined() {
 // This doesn't mean that the client's tracks are already published to the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnJoined(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onJoinedCallbacks = append(c.onJoinedCallbacks, callback)
 }
@@ -1341,15 +1358,15 @@ func (c *Client) OnJoined(callback func()) {
 // OnLeft event is called when the client is left from the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnLeft(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
 }
 
 func (c *Client) onLeft() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	for _, callback := range c.onLeftCallbacks {
 		go callback()
@@ -1375,9 +1392,8 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 		c.idleTimeoutCancel()
 	}
 
-	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, timeout)
-
 	go func() {
+		c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, timeout)
 		<-c.idleTimeoutContext.Done()
 		if c == nil || c.idleTimeoutContext == nil || c.idleTimeoutCancel == nil {
 			return
@@ -1417,19 +1433,17 @@ func (c *Client) PeerConnection() *PeerConnection {
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender, ssrc webrtc.SSRC) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if sender == nil ||
-		c.statsGetter == nil ||
-		c.stats == nil ||
-		sender.Track() == nil {
+	if c.statsGetter == nil ||
+		c.stats == nil {
 
 		return
 	}
 
 	stats := c.statsGetter.Get(uint32(ssrc))
-	if stats != nil {
+	if stats != nil && sender != nil && sender.Track() != nil {
 		c.stats.SetSender(sender.Track().ID(), *stats)
 	}
 }
@@ -1561,7 +1575,12 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return uint32(c.estimator.GetTargetBitrate())
+	if c.estimator == nil {
+		return c.sfu.bitrateConfigs.InitialBandwidth
+	}
+
+	// overshot the bandwidth by 40%
+	return uint32(c.estimator.GetTargetBitrate() * 1400 / 1000)
 }
 
 // This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
@@ -1673,7 +1692,7 @@ func (c *Client) Stats() ClientTrackStats {
 		Receives:                 make([]TrackReceivedStats, 0),
 		CurrentPublishLimitation: c.ingressQualityLimitationReason.Load().(string),
 		CurrentConsumerBitrate:   c.bitrateController.totalSentBitrates(),
-		VoiceActivityDuration:    uint32(c.stats.VoiceActivity().Milliseconds()),
+		VoiceActivityDurationMS:  uint32(c.stats.VoiceActivity().Milliseconds()),
 	}
 
 	for _, track := range c.Tracks() {
@@ -1713,15 +1732,30 @@ func (c *Client) Stats() ClientTrackStats {
 			}
 
 		} else {
-			t := track.(*Track)
-			stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
-			if err != nil {
-				continue
-			}
+			var receivedStats TrackReceivedStats
 
-			receivedStats, err := generateClientReceiverStats(c, track.(*Track).RemoteTrack().Track(), stat)
-			if err != nil {
-				continue
+			if track.Kind() == webrtc.RTPCodecTypeAudio {
+				t := track.(*AudioTrack)
+				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
+				if err != nil {
+					continue
+				}
+
+				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
+				if err != nil {
+					continue
+				}
+			} else {
+				t := track.(*Track)
+				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
+				if err != nil {
+					continue
+				}
+
+				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
+				if err != nil {
+					continue
+				}
 			}
 
 			clientStats.Receives = append(clientStats.Receives, receivedStats)
@@ -1754,6 +1788,7 @@ func (c *Client) Stats() ClientTrackStats {
 			CurrentBitrate: track.SendBitrate(),
 			Source:         source,
 			Quality:        track.Quality(),
+			MaxQuality:     track.MaxQuality(),
 		}
 
 		clientStats.Sents = append(clientStats.Sents, sentStats)
@@ -1793,15 +1828,17 @@ func (c *Client) onTracksAvailable(tracks []ITrack) {
 
 // OnVoiceDetected event is called when the SFU is detecting voice activity in the room.
 // The callback will receive the voice activity data that can be use for visual indicator of current speaker.
-func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Client) OnVoiceSentDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
-	c.onVoiceDetectedCallbacks = append(c.onVoiceDetectedCallbacks, callback)
+	c.onVoiceSentDetectedCallbacks = append(c.onVoiceSentDetectedCallbacks, callback)
 }
 
-func (c *Client) onVoiceDetected(activity voiceactivedetector.VoiceActivity) {
-	for _, callback := range c.onVoiceDetectedCallbacks {
+func (c *Client) onVoiceSentDetected(activity voiceactivedetector.VoiceActivity) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+	for _, callback := range c.onVoiceSentDetectedCallbacks {
 		callback(activity)
 	}
 }
@@ -1811,7 +1848,7 @@ func (c *Client) IsVADEnabled() bool {
 }
 
 func (c *Client) enableSendVADToInternalDataChannel() {
-	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+	c.OnVoiceSentDetected(func(activity voiceactivedetector.VoiceActivity) {
 		if c.internalDataChannel == nil {
 			return
 		}
@@ -1869,18 +1906,33 @@ func (c *Client) sendVad(dataType string, activity voiceactivedetector.VoiceActi
 	}
 }
 
+func (c *Client) OnVoiceReceivedDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+
+	c.onVoiceReceivedDetectedCallbacks = append(c.onVoiceReceivedDetectedCallbacks, callback)
+}
+
 func (c *Client) enableVADStatUpdate() {
-	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+	c.OnVoiceReceivedDetected(func(activity voiceactivedetector.VoiceActivity) {
 		if len(activity.AudioLevels) == 0 {
-			c.stats.UpdateVoiceActivity(0)
+			c.stats.UpdateVoiceActivity(0, 0)
 			return
 		}
 
 		for _, data := range activity.AudioLevels {
-			duration := data.Timestamp * 1000 / activity.ClockRate
-			c.stats.UpdateVoiceActivity(duration)
+			c.stats.UpdateVoiceActivity(data.Timestamp, activity.ClockRate)
 		}
 	})
+}
+
+func (c *Client) onVoiceReceiveDetected(activity voiceactivedetector.VoiceActivity) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+
+	for _, callback := range c.onVoiceReceivedDetectedCallbacks {
+		callback(activity)
+	}
 }
 
 func (c *Client) Tracks() []ITrack {

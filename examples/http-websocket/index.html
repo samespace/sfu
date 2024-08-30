@@ -231,7 +231,11 @@
                 };
             });
 
+<<<<<<< HEAD
             ws.onmessage = async function (e) {
+=======
+            ws.onmessage = async function(e) {
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
                 const msg = JSON.parse(e.data);
                 try {
                     if (msg.type == 'clientid') {
@@ -258,7 +262,7 @@
                         const trackType = {}
                         const tracksAdded = msg.data
                         Object.keys(tracksAdded).forEach(uid => {
-                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media
                             trackType[uid] = "media"
                         });
 
@@ -268,7 +272,7 @@
                         const subTracks = []
                         const availableTracks = msg.data
                         Object.keys(availableTracks).forEach(uid => {
-                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media
                             // ClientID string `json:"client_id"`
                             // StreamID string `json:"stream_id"`
                             // TrackID  string `json:"track_id"`
@@ -305,21 +309,36 @@
         function updateVoiceDetected(vad) {
             const streamid = vad.data.streamID
 
+<<<<<<< HEAD
             const videoEl = document.getElementById("video-" + streamid)
             if (!videoEl) {
                 console.log("video element not found ", streamid)
+=======
+            const videoEl = document.getElementById("video-"+streamid)
+			const container = document.getElementById("container-"+streamid)
+            if (!videoEl){
+				console.log("video element not found ",streamid)
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
                 return
             }
 
 
+<<<<<<< HEAD
             if (vad.type === 'vad_ended') {
                 // voice ended
+=======
+            if (vad.type === 'vad_ended'){
+                // voice ended	
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
                 videoEl.style.border = "none"
+				container.style.margin = "0"
             } else {
                 // voice detected
                 videoEl.style.border = "5px solid green"
+				container.style.margin = "-5px"
             }
 
+<<<<<<< HEAD
             let vadEl = document.getElementById("vad-" + streamid)
             if (!vadEl) {
                 vadEl = document.createElement("div");
@@ -327,6 +346,20 @@
                 const container = document.getElementById("container-" + streamid)
                 container.appendChild(vadEl)
             }
+=======
+			let vadEl = document.getElementById("vad-"+streamid)
+			if (!vadEl){
+				vadEl = document.createElement("div");
+				vadEl.id = "vad-"+streamid
+				
+				container.appendChild(vadEl)
+			}
+
+			if (vad.data.audioLevels!==null){
+				vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
+									return sum + value.audioLevel;
+								}, 0) / vad.data.audioLevels.length);
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
             if (vad.data.audioLevels !== null) {
                 vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
@@ -340,13 +373,14 @@
 
 
         function startH264() {
-            start('h264')
+            start('h264',false)
         }
 
         function startVP9() {
-            start('vp9')
+            start('vp9',false)
         }
 
+<<<<<<< HEAD
         function setOpusSDP(sdp) {
             let fmtlineOpus = ''
 
@@ -391,9 +425,18 @@
         }
 
         async function start(codec) {
+=======
+		function viewOnly(){
+			start(null,true)
+		}
+
+
+        async function start(codec,viewOnly) {
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
             await startWs()
-            document.getElementById("btnStart").disabled = true;
+            document.getElementById("btnStartH264").disabled = true;
             document.getElementById("btnStartVP9").disabled = true;
+<<<<<<< HEAD
 
             const video = {
                 width: { ideal: 1280 },
@@ -437,8 +480,95 @@
             }
 
             localVideo.srcObject = stream;
+=======
+			document.getElementById("btnViewOnly").disabled = true;
+
+			if(!viewOnly){
+				const video =  {
+                width: {ideal: 1280},
+                height: {ideal: 720},
+                advanced: [{
+                    frameRate: {min: 30}},
+                    {height: {min: 360}},
+                    {width: {min: 720}},
+                    {frameRate: {max: 30}},
+                    {width: {max: 1280}},
+                    {height: {max: 720}},
+                    {aspectRatio: {exact: 1.77778}}
+                ]};
 
 
+				const constraints = {
+					audio: true,
+					video: video
+					// video: true
+				};
+
+				const stream = await navigator.mediaDevices.getUserMedia(constraints)
+				const streamid = stream.id.replace('{','').replace('}','');
+				let container = document.getElementById("container-"+streamid);
+				if (!container) {
+					container = document.createElement("div");
+					container.className = "container";
+					container.id = "container-"+streamid;
+					document.querySelector('main').appendChild(container);
+				}
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
+
+				let localVideo = document.getElementById("video-"+streamid);
+				if (!localVideo) {
+					localVideo = document.createElement("video");
+					localVideo.id = "video-"+streamid;
+					localVideo.autoplay = true;
+					localVideo.muted = true;
+					container.appendChild(localVideo);
+				}
+
+				localVideo.srcObject =stream;
+
+				const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [{priority: 'high'}],
+				})
+
+
+
+				if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
+					const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
+
+					let audioCodecsPref = [];
+					if (red){
+						for(let i = 0; i < audioCodecs.length; i++){
+							// audio/red 48000 111/111
+							if(audioCodecs[i].mimeType == "audio/red"){
+								audioCodecsPref.push(audioCodecs[i]);
+							}
+						}
+					}
+
+					for(let i = 0; i < audioCodecs.length; i++){
+						if(audioCodecs[i].mimeType == "audio/opus"){
+							audioCodecsPref.push(audioCodecs[i]);
+						}
+					}
+
+					audioTcvr.setCodecPreferences(audioCodecsPref);
+				}
+
+
+				setCodecPreferences(peerConnection,stream, codec, "L3T3_KEY")
+			} else {
+				peerConnection.addTransceiver('video', {
+					direction: 'sendrecv',
+				})
+
+				peerConnection.addTransceiver('audio', {
+					direction: 'sendrecv',
+				})
+			}
+
+<<<<<<< HEAD
             peerConnection.ontrack = function (e) {
                 e.receiver.playoutDelayHint = 0.1;
 
@@ -446,6 +576,13 @@
                     console.log("ontrack", stream, e.track);
 
                     let container = document.getElementById("container-" + stream.id);
+=======
+            peerConnection.ontrack = function(e) {
+                e.streams.forEach((stream) => {
+                    console.log("ontrack", stream, e.track);
+
+                    let container = document.getElementById("container-"+stream.id);
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
                     if (!container) {
                         container = document.createElement("div");
                         container.className = "container";
@@ -481,6 +618,11 @@
                         }
                     }
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
 
 
@@ -500,6 +642,7 @@
 
             };
 
+<<<<<<< HEAD
             // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
             // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
@@ -548,6 +691,9 @@
             const offer = await peerConnection.createOffer()
 
             // offer.sdp = setOpusSDP(offer.sdp)
+=======
+            const offer=await peerConnection.createOffer()
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
             await peerConnection.setLocalDescription(offer)
 
@@ -560,7 +706,11 @@
                 }
             };
 
+<<<<<<< HEAD
             peerConnection.onconnectionstatechange = function (e) {
+=======
+            peerConnection.onconnectionstatechange = function(e) {
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
                 console.log("onconnectionstatechange", peerConnection.connectionState);
                 if (peerConnection.connectionState == "connected") {
                     monitorStats()
@@ -569,6 +719,7 @@
             };
         }
 
+<<<<<<< HEAD
         const setCodecPreferences = (peerConnection, stream, codec, scalabilityMode) => {
             const isFirefox = navigator.userAgent.includes("Firefox")
             const isSimulcast = document.querySelector("#simulcast").checked
@@ -621,6 +772,60 @@
                         ]
                     })
                 }
+=======
+		const setCodecPreferences = (peerConnection,stream, codec,scalabilityMode) => {
+			const isFirefox =navigator.userAgent.includes("Firefox")
+			const isSimulcast = document.querySelector("#simulcast").checked
+			const isSvc = document.querySelector("#svc").checked
+			const maxBitrate = document.querySelector("#maxBitrate").value
+
+            if (codec ==='vp9' && !isFirefox){
+				let videoTcvr = null
+
+				console.log("simulcast: ",isSimulcast)
+
+				if (!isSimulcast){
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								maxBitrate: maxBitrate,
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
+							},
+
+						]
+					})
+
+				} else {
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								rid: 'high',
+								maxBitrate: maxBitrate,
+								maxFramerate: 30,
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
+							},
+							{
+								rid: 'mid',
+								scaleResolutionDownBy: 2.0,
+								maxFramerate: 30,
+								maxBitrate:maxBitrate/2,
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
+							},
+							{
+								rid: 'low',
+								scaleResolutionDownBy: 4.0,
+								maxBitrate: maxBitrate/4,
+								maxFramerate:30,
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
+							}
+						]
+					})
+				}
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
                 const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
                 let vp9_codecs = [];
@@ -643,6 +848,7 @@
                     videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
+<<<<<<< HEAD
                 let videoTcvr = null
                 if (!isSimulcast) {
                     videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
@@ -652,6 +858,46 @@
                             {
                                 maxBitrate: 1200 * 1000,
                             },
+=======
+				let videoTcvr = null
+				if (!isSimulcast){
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								maxBitrate: 1200*1000,
+							},
+
+						]
+					})
+
+				} else {
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								rid: 'high',
+								maxBitrate: 1200*1000,
+								maxFramerate: 30,
+							},
+							{
+								rid: 'mid',
+								scaleResolutionDownBy: 2.0,
+								maxFramerate: 30,
+								maxBitrate: 500*1000,
+							},
+							{
+								rid: 'low',
+								scaleResolutionDownBy: 4.0,
+								maxBitrate: 150*1000,
+								maxFramerate:30,
+							}
+						]
+					})
+				}
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
                         ]
                     })
@@ -731,7 +977,11 @@
                     continue
                 }
 
+<<<<<<< HEAD
                 const ratio = bwController.available / totalBw
+=======
+                const ratio = bwController.available/totalBw
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
                 await sleep(5000)
             }
@@ -822,7 +1072,12 @@
                         bwController.available = report.availableOutgoingBitrate
                     }
 
+<<<<<<< HEAD
                     if (report.type === 'outbound-rtp' && report.kind === 'video') {
+=======
+                    if (report.type === 'outbound-rtp' && report.kind === 'video'){
+
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
 
                         if (report.rid === 'high' || typeof report.rid === 'undefined') {
@@ -861,6 +1116,10 @@
 
                         }
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
 
                         if (report.rid === 'mid') {
@@ -1013,7 +1272,11 @@
 
             const container = document.createElement("div");
             container.className = "container";
+<<<<<<< HEAD
             container.id = "container-" + videoTrack.id;
+=======
+            container.id = "container-"+videoTrack.id;
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
             const video = document.createElement("video");
             video.id = "video-" + videoTrack.id;
@@ -1044,15 +1307,26 @@
         }
 
         const negotiate = async () => {
+<<<<<<< HEAD
             console.log("negotiate")
             const offer = await peerConnection.createOffer()
+=======
+			console.log("negotiate")
+            const offer=await peerConnection.createOffer()
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
             await peerConnection.setLocalDescription(offer)
             ws.send(JSON.stringify({ type: 'offer', data: offer.sdp }));
         }
 
+<<<<<<< HEAD
         document.addEventListener("DOMContentLoaded", function (event) {
             document.getElementById("btnStart").onclick = startH264;
+=======
+        document.addEventListener("DOMContentLoaded", function(event) {
+			document.getElementById("btnViewOnly").onclick = viewOnly;
+            document.getElementById("btnStartH264").onclick = startH264;
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
             document.getElementById("btnStartVP9").onclick = startVP9;
             document.getElementById("btnToggleMic").onclick = toggleMic;
             document.getElementById("btnToggleCam").onclick = toggleCam;
@@ -1077,8 +1351,9 @@
         <div id="stats-local"></div>
     </aside>
     <footer>
-        <button id="btnStart">Start H264</button>
+        <button id="btnStartH264">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
+<<<<<<< HEAD
         <button id="btnToggleMic">Mute Mic</button>
         <button id="btnToggleCam">Mute Cam</button>
         <button id="btnToggleRecording">Start Recording</button>
@@ -1094,6 +1369,27 @@
                 <option value="low">low</option>
                 <option value="none">none</option>
             </select></span>
+=======
+		<button id="btnViewOnly">View only</button>
+		<button id="btnToggleMic">Mute Mic</button>
+		<button id="btnToggleCam">Mute Cam</button>
+		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
+		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
+        <button id="btnShareScreen">Share Screen</button>
+        <button id="btnStats">Toggle Stats</button>
+        <span><label>Quality</label> <select id="selectQuality">
+            <option selected value="high">high</option>
+			<option value="highmid">high-mid</option>
+            <option value="highlow">high-low</option>
+            <option value="mid">mid</option>
+            <option value="midmid">mid-mid</option>
+            <option value="midlow">mid-low</option>
+            <option value="low">low</option>
+            <option value="lowmid">low-mid</option>
+			<option value="lowlow">low-low</option>
+            <option value="none">none</option>
+        </select></span>
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
         <span><label>MaxBitrate</label> <select id="maxBitrate">
                 <option value="120000">120Kbps</option>
@@ -1104,5 +1400,9 @@
             </select></span>
     </footer>
 </body>
+<<<<<<< HEAD
 
 </html>
+=======
+</html>
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a

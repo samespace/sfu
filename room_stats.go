@@ -23,6 +23,7 @@ type TrackSentStats struct {
 	CurrentBitrate uint32              `json:"current_bitrate"`
 	Source         string              `json:"source"`
 	Quality        QualityLevel        `json:"quality"`
+	MaxQuality     QualityLevel        `json:"max_quality"`
 }
 
 type TrackReceivedStats struct {
@@ -47,7 +48,7 @@ type ClientTrackStats struct {
 	Sents                    []TrackSentStats     `json:"sent_track_stats"`
 	Receives                 []TrackReceivedStats `json:"received_track_stats"`
 	// in milliseconds
-	VoiceActivityDuration uint32 `json:"voice_activity_duration"`
+	VoiceActivityDurationMS uint32 `json:"voice_activity_duration_ms"`
 }
 
 type RoomStats struct {

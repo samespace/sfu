@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -41,16 +42,22 @@ type clientTrack struct {
 	localTrack            *webrtc.TrackLocalStaticRTP
 	remoteTrack           *remoteTrack
 	baseTrack             *baseTrack
+	packetmap             *packetmap.Map
 	isScreen              bool
 	ssrc                  webrtc.SSRC
 	onTrackEndedCallbacks []func()
 }
 
+<<<<<<< HEAD
 func newClientTrack(c *Client, t *Track, isScreen bool, localTrack webrtc.TrackLocal) *clientTrack {
+=======
+func newClientTrack(c *Client, t ITrack, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 	ctx, cancel := context.WithCancel(t.Context())
+	track := t.(*Track)
 
 	if localTrack == nil {
-		localTrack = t.createLocalTrack()
+		localTrack = track.createLocalTrack()
 	}
 
 	ct := &clientTrack{
@@ -60,12 +67,20 @@ func newClientTrack(c *Client, t *Track, isScreen bool, localTrack webrtc.TrackL
 		mu:                    sync.RWMutex{},
 		client:                c,
 		kind:                  localTrack.Kind(),
+<<<<<<< HEAD
 		localTrack:            localTrack.(*webrtc.TrackLocalStaticRTP),
 		remoteTrack:           t.remoteTrack,
 		baseTrack:             t.base,
+=======
+		mimeType:              localTrack.Codec().MimeType,
+		localTrack:            localTrack,
+		remoteTrack:           track.remoteTrack,
+		baseTrack:             track.base,
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 		isScreen:              isScreen,
-		ssrc:                  t.remoteTrack.track.SSRC(),
+		ssrc:                  track.remoteTrack.track.SSRC(),
 		onTrackEndedCallbacks: make([]func(), 0),
+		packetmap:             &packetmap.Map{},
 	}
 
 	t.OnEnded(func() {
@@ -100,6 +115,7 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 func (t *clientTrack) SendBitrate() uint32 {
 	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
+		t.client.log.Errorf("clienttrack: error on get sender bitrate %s", err.Error())
 		return 0
 	}
 
@@ -127,8 +143,29 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
+	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, 0)
+	if !ok {
+		return
+	}
+
+	p.SequenceNumber = newseqno
+
 	if t.Kind() == webrtc.RTPCodecTypeAudio {
 		// do something here with audio level
+	}
+
+	// if video quality is none we need to send blank frame
+	// make sure the player is paused when the quality is none.
+	// quality none only possible when the video is not displayed
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		quality := t.getQuality()
+		if quality == QualityNone {
+			if ok := t.packetmap.Drop(p.SequenceNumber, 0); ok {
+				return
+			}
+
+			p.Payload = p.Payload[:0]
+		}
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
@@ -168,7 +205,11 @@ func (t *clientTrack) SetMaxQuality(_ QualityLevel) {
 }
 
 func (t *clientTrack) MaxQuality() QualityLevel {
-	return QualityHigh
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		return QualityHigh
+	}
+
+	return QualityAudio
 }
 
 func (t *clientTrack) SSRC() webrtc.SSRC {
@@ -197,4 +238,20 @@ func (t *clientTrack) onEnded() {
 	for _, f := range t.onTrackEndedCallbacks {
 		f()
 	}
+}
+
+func (t *clientTrack) getQuality() QualityLevel {
+	claim := t.client.bitrateController.GetClaim(t.ID())
+
+	if claim == nil {
+		t.client.log.Warnf("scalabletrack: claim is nil")
+		return QualityNone
+	}
+
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
+func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
+
+	return DefaultQualityPresets[lvl]
 }

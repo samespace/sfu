@@ -85,7 +85,7 @@ type RoomOptions struct {
 	PLIInterval *time.Duration `json:"pli_interval_ns,omitempty" example:"0"`
 	// Configure the mapping of spatsial and temporal layers to quality level
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
-	QualityPresets *QualityPresets `json:"quality_presets,omitempty"`
+	QualityLevels []QualityLevel `json:"quality_levels,omitempty"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
 	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,omitempty" example:"300000000000" default:"300000000000"`
 	// Configure the quic configuration for recording
@@ -97,8 +97,13 @@ func DefaultRoomOptions() RoomOptions {
 	emptyDuration := time.Duration(3) * time.Minute
 	return RoomOptions{
 		Bitrates:         DefaultBitrates(),
+<<<<<<< HEAD
 		QualityPresets:   DefaultQualityPresets(),
 		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
+=======
+		QualityLevels:    DefaultQualityLevels(),
+		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 		PLIInterval:      &pli,
 		EmptyRoomTimeout: &emptyDuration,
 	}
@@ -198,6 +203,8 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	if r.state == StateRoomClosed {
 		return nil, ErrRoomIsClosed
 	}
+
+	opts.qualityLevels = r.options.QualityLevels
 
 	for _, ext := range r.extensions {
 		if err := ext.OnBeforeClientAdded(r, id); err != nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -71,6 +70,7 @@ const (
 var logger logging.LeveledLogger
 
 func main() {
+<<<<<<< HEAD
 
 	var err error
 
@@ -114,13 +114,16 @@ func main() {
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
+=======
+	_ = os.Setenv("logtostderr", "true")
+	os.Setenv("stderrthreshold", "TRACE")
+>>>>>>> 1023c3c52e3f40e0fc620e9a24f81508a0a0bc7a
 
-	flag.Set("PIONS_LOG_ERROR", "sfu,vad")
-	flag.Set("PIONS_LOG_WARN", "sfu,vad")
-	// flag.Set("PIONS_LOG_DEBUG", "sfu,vad")
-	// flag.Set("PIONS_LOG_TRACE", "sfu,vad")
-
-	flag.Parse()
+	os.Setenv("PIONS_LOG_TRACE", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_DEBUG", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_INFO", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_WARN", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_ERROR", "sfu,vad,bitratecontroller")
 
 	logger = logging.NewDefaultLoggerFactory().NewLogger("sfu")
 
@@ -499,12 +502,30 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				case "low":
 					log.Println("switch to low quality")
 					client.SetQuality(sfu.QualityLow)
+				case "lowmid":
+					log.Println("switch to low mid quality")
+					client.SetQuality(sfu.QualityLowMid)
+				case "lowlow":
+					log.Println("switch to low low quality")
+					client.SetQuality(sfu.QualityLowLow)
 				case "mid":
 					log.Println("switch to mid quality")
 					client.SetQuality(sfu.QualityMid)
+				case "midmid":
+					log.Println("switch to mid mid quality")
+					client.SetQuality(sfu.QualityMidMid)
+				case "midlow":
+					log.Println("switch to mid low quality")
+					client.SetQuality(sfu.QualityMidLow)
 				case "high":
 					log.Println("switch to high quality")
 					client.SetQuality(sfu.QualityHigh)
+				case "highmid":
+					log.Println("switch to high mid quality")
+					client.SetQuality(sfu.QualityHighMid)
+				case "highlow":
+					log.Println("switch to high low quality")
+					client.SetQuality(sfu.QualityHighLow)
 				case "none":
 					log.Println("switch to high quality")
 					client.SetQuality(sfu.QualityNone)
