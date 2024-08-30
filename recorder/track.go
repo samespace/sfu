@@ -27,6 +27,7 @@ type TrackConfig struct {
 	RoomID   string
 	FileName string
 	MimeType string
+	Channel  int
 }
 
 type TrackRecorder interface {
