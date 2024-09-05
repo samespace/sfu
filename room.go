@@ -151,13 +151,6 @@ func (r *Room) AddExtension(extension IExtension) {
 	r.extensions = append(r.extensions, extension)
 }
 
-func (r *Room) SendCloseDatagram() error {
-	if r.quicClient == nil {
-		return nil
-	}
-	return r.quicClient.SendDatagram([]byte("close"))
-}
-
 // Close the room and stop all clients. All connected clients will stopped and removed from the room.
 // All clients will get `connectionstateevent` with `closed` state.
 // https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionstatechange_event
@@ -294,7 +287,7 @@ func (r *Room) StartRecording(bucketName, filename string) error {
 	return nil
 }
 
-func (r *Room) StopRecording() {
+func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
 	swp := r.isRecording.CompareAndSwap(true, false)
 	if !swp {
 		return
@@ -303,7 +296,8 @@ func (r *Room) StopRecording() {
 		client.stopRoomRecording()
 	}
 	if r.quicClient != nil {
-		r.quicClient.SendDatagram([]byte("close"))
+		fmt.Println(stopConfig)
+		fmt.Println(r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 		r.quicClient = nil
 	}
 }

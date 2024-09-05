@@ -642,12 +642,12 @@ func (c *Client) StartClientRecording(bucketName, filename string) error {
 	return nil
 }
 
-func (c *Client) StopClientRecording() {
+func (c *Client) StopClientRecording(stopConfig recorder.StopConfig) {
 	for _, track := range c.tracks.GetTracks() {
 		track.StopRecording()
 	}
 	if c.quicClient != nil {
-		c.quicClient.SendDatagram([]byte("close"))
+		c.quicClient.SendDatagram(serializeCloseDatagram(stopConfig))
 		c.quicClient = nil
 	}
 }

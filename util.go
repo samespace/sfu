@@ -2,7 +2,9 @@ package sfu
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log"
@@ -19,6 +21,7 @@ import (
 	"github.com/pion/sdp/v3"
 	"github.com/pion/turn/v3"
 	"github.com/pion/webrtc/v4"
+	"github.com/samespace/sfu/recorder"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -527,4 +530,15 @@ func copyRTPPacket(packet *rtp.Packet) *rtp.Packet {
 	newPacket.Payload = make([]byte, len(packet.Payload))
 	copy(newPacket.Payload, packet.Payload)
 	return newPacket
+}
+
+func serializeCloseDatagram(cfg recorder.StopConfig) []byte {
+	var buf bytes.Buffer
+	buf.Write([]byte("close"))
+	j, err := json.Marshal(cfg)
+	if err != nil {
+		return nil
+	}
+	buf.Write(j)
+	return buf.Bytes()
 }

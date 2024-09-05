@@ -70,6 +70,8 @@ const (
 
 var logger logging.LeveledLogger
 
+var startTime = time.Now()
+
 func main() {
 
 	var err error
@@ -523,13 +525,20 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				}
 
 				respBytes, _ := json.Marshal(resp)
-
 				conn.Write(respBytes)
-
 			} else if req.Type == "start_recording" {
-				r.StartRecording("wave", client.ID()+".webm")
+				r.StartRecording("wave", client.ID()+".ogg")
 			} else if req.Type == "stop_recording" {
-				r.StopRecording()
+				fmt.Println("stop recording")
+				r.StopRecording(recorder.StopConfig{
+					Splits: []recorder.SplitConfig{
+						{
+							Start:    time.Duration(time.Second * 5),
+							End:      time.Duration(time.Second * 10),
+							FileName: client.ID() + startTime.Format("2006-01-02T15") + ".ogg",
+						},
+					},
+				})
 			} else {
 				logger.Errorf("unknown message type", req)
 			}
