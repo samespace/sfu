@@ -208,6 +208,7 @@ func DefaultClientOptions() ClientOptions {
 }
 
 func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+
 	var client *Client
 	var vadInterceptor *voiceactivedetector.Interceptor
 
@@ -306,8 +307,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		panic(err)
 	}
 
+	fmt.Println("peerConnectionConfig", peerConnectionConfig)
+
 	// Create a new RTCPeerConnection
-	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(opts.settingEngine), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
+	peerConnection, err := webrtc.NewAPI(webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
 	if err != nil {
 		panic(err)
 	}
@@ -642,12 +645,12 @@ func (c *Client) StartClientRecording(bucketName, filename string) error {
 	return nil
 }
 
-func (c *Client) StopClientRecording() {
+func (c *Client) StopClientRecording(stopConfig recorder.StopConfig) {
 	for _, track := range c.tracks.GetTracks() {
 		track.StopRecording()
 	}
 	if c.quicClient != nil {
-		c.quicClient.SendDatagram([]byte("close"))
+		c.quicClient.SendDatagram(serializeCloseDatagram(stopConfig))
 		c.quicClient = nil
 	}
 }

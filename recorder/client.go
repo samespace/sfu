@@ -22,6 +22,26 @@ type ClientConfig struct {
 	ClientId   string
 	BucketName string
 	FileName   string
+	Channel    int // 1 to left channel, 2 to right channel
+}
+
+type SplitConfig struct {
+	Start    time.Duration
+	End      time.Duration
+	FileName string
+}
+
+type Channel int
+
+const (
+	LeftChannel  Channel = 1
+	RightChannel Channel = 2
+)
+
+type ChannelConfig map[string]int
+type StopConfig struct {
+	Splits        []SplitConfig
+	ChannelConfig ChannelConfig
 }
 
 func GetRandomQuicClient(clientConfig ClientConfig, config []*QuicConfig) (quic.Connection, error) {

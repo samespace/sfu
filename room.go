@@ -2,7 +2,9 @@ package sfu
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -71,6 +73,8 @@ type Room struct {
 	extensions              []IExtension
 	OnEvent                 func(event Event)
 	quicClient              quic.Connection
+	isRecording             atomic.Bool
+	isRecordingPaused       atomic.Bool
 	options                 RoomOptions
 }
 
@@ -145,13 +149,6 @@ func (r *Room) Kind() string {
 
 func (r *Room) AddExtension(extension IExtension) {
 	r.extensions = append(r.extensions, extension)
-}
-
-func (r *Room) SendCloseDatagram() error {
-	if r.quicClient == nil {
-		return nil
-	}
-	return r.quicClient.SendDatagram([]byte("close"))
 }
 
 // Close the room and stop all clients. All connected clients will stopped and removed from the room.
@@ -264,6 +261,10 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 }
 
 func (r *Room) StartRecording(bucketName, filename string) error {
+	swp := r.isRecording.CompareAndSwap(false, true)
+	if !swp {
+		return fmt.Errorf("recording is already started")
+	}
 	var quicClient quic.Connection = r.quicClient
 	var err error
 	if quicClient == nil {
@@ -286,17 +287,26 @@ func (r *Room) StartRecording(bucketName, filename string) error {
 	return nil
 }
 
-func (r *Room) StopRecording() {
+func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
+	swp := r.isRecording.CompareAndSwap(true, false)
+	if !swp {
+		return
+	}
 	for _, client := range r.sfu.clients.GetClients() {
 		client.stopRoomRecording()
 	}
 	if r.quicClient != nil {
-		r.quicClient.SendDatagram([]byte("close"))
+		fmt.Println(stopConfig)
+		fmt.Println(r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 		r.quicClient = nil
 	}
 }
 
 func (r *Room) PauseRecording() {
+	swp := r.isRecordingPaused.CompareAndSwap(false, true)
+	if !swp {
+		return
+	}
 	for _, client := range r.sfu.clients.GetClients() {
 		client.pauseRoomRecording()
 	}
@@ -304,6 +314,10 @@ func (r *Room) PauseRecording() {
 }
 
 func (r *Room) ContinueRecording() {
+	swp := r.isRecordingPaused.CompareAndSwap(true, false)
+	if !swp {
+		return
+	}
 	for _, client := range r.sfu.clients.GetClients() {
 		client.continueRoomRecording()
 	}

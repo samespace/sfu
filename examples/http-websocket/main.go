@@ -9,14 +9,12 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/pion/logging"
 	"github.com/pion/webrtc/v4"
 	"github.com/samespace/sfu"
-	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
 	"github.com/samespace/sfu/recorder"
@@ -69,6 +67,8 @@ const (
 )
 
 var logger logging.LeveledLogger
+
+var startTime = time.Now()
 
 func main() {
 
@@ -129,18 +129,17 @@ func main() {
 	defer cancel()
 
 	sfuOpts := sfu.DefaultOptions()
+	sfuOpts.IceServers = []webrtc.ICEServer{
+		{
+			URLs: []string{"stun:stun.l.google.com:19302"},
+		}, {
+			URLs: []string{"stun:stun1.l.google.com:19302"},
+		}, {
+			URLs: []string{"stun:stun2.l.google.com:19302"},
+		},
+	}
 
 	sfuOpts.EnableBandwidthEstimator = true
-
-	fakeClientCount := 0
-
-	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
-	if turnEnabled || fakeClientCount > 0 {
-		sfu.StartStunServer(ctx, "127.0.0.1")
-		sfuOpts.IceServers = append(sfuOpts.IceServers, webrtc.ICEServer{
-			URLs: []string{"stun:127.0.0.1:3478"},
-		})
-	}
 
 	// create room manager first before create new room
 	roomManager := sfu.NewManager(ctx, "server-name-here", sfuOpts)
@@ -159,36 +158,16 @@ func main() {
 			KeyFile:  "server.key",
 		},
 	}
+	emptyRoomTimeout := 1 * time.Hour
+	roomsOpts.EmptyRoomTimeout = &emptyRoomTimeout
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
-	// roomsOpts.PLIInterval = 3 * time.Second
-	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
-
-	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
-	// defer turnServer.Close()
-
-	iceServers := []webrtc.ICEServer{
-		{
-			URLs: []string{"stun:127.0.0.1:3478"},
-		},
-	}
-
-	for i := 0; i < fakeClientCount; i++ {
-		// create a fake client
-		fc := fakeclient.Create(ctx, roomManager.Log(), defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
-
-		fc.Client.OnTracksAdded(func(addedTracks []sfu.ITrack) {
-			setTracks := make(map[string]sfu.TrackType, 0)
-			for _, track := range addedTracks {
-				setTracks[track.ID()] = sfu.TrackTypeMedia
-			}
-			fc.Client.SetTracksSourceType(setTracks)
-		})
-	}
+	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeRemote, roomsOpts)
 
 	fs := http.FileServer(http.Dir("./"))
 	http.Handle("/", fs)
 
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
+		fmt.Println("new connection")
 		messageChan := make(chan Request)
 		isDebug := false
 		if conn.Request().URL.Query().Get("debug") != "" {
@@ -202,7 +181,7 @@ func main() {
 		statsHandler(w, r, defaultRoom)
 	})
 
-	logger.Info("Listening on http://localhost:8000 ...")
+	logger.Info("Listening...")
 
 	err = http.ListenAndServe(":8000", nil)
 	if err != nil {
@@ -261,6 +240,8 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
 	client, err := r.AddClient(clientID, clientID, opts)
+	fmt.Println("new client", clientID)
+
 	if err != nil {
 		log.Panic(err)
 		return
@@ -523,13 +504,20 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				}
 
 				respBytes, _ := json.Marshal(resp)
-
 				conn.Write(respBytes)
-
 			} else if req.Type == "start_recording" {
-				r.StartRecording("wave", client.ID()+".webm")
+				r.StartRecording("wave", client.ID()+".ogg")
 			} else if req.Type == "stop_recording" {
-				r.StopRecording()
+				fmt.Println("stop recording")
+				r.StopRecording(recorder.StopConfig{
+					Splits: []recorder.SplitConfig{
+						{
+							Start:    time.Duration(time.Second * 5),
+							End:      time.Duration(time.Second * 10),
+							FileName: client.ID() + startTime.Format("2006-01-02T15") + ".ogg",
+						},
+					},
+				})
 			} else {
 				logger.Errorf("unknown message type", req)
 			}

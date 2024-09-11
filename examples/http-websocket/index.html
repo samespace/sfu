@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 
 <head>
-    <title>HTTP WebSocket Example</title>
+    <title>Samespace media server</title>
     <meta charset="utf-8">
     <style>
         body {
@@ -121,6 +121,13 @@
                 {
                     urls: "stun:stun.l.google.com:19302"
                 },
+                {
+                    urls: "stun:stun1.l.google.com:19302"
+                }, {
+                    urls: "stun:stun2.l.google.com:19302"
+                }, {
+                    urls: "stun:stun3.l.google.com:19302"
+                }
             ]
         });
 
@@ -220,7 +227,7 @@
                 red = false
             }
 
-            ws = new WebSocket(`ws://${window.location.host}/ws?${debug ? 'debug=1' : ''}`);
+            ws = new WebSocket(`ws://35.247.181.17:8000/ws?${debug ? 'debug=1' : ''}`);
             const promise = new Promise((resolve, reject) => {
                 ws.onopen = function () {
                     resolve()
@@ -413,7 +420,7 @@
 
             const constraints = {
                 audio: true,
-                video: false
+                video: video
                 // video: true
             };
 
@@ -739,7 +746,7 @@
 
 
         const updateTrackStats = (trackStats) => {
-            const sentStats = trackStats.sent_track_stats
+            const sentStats = trackStats.sent_track_stats || []
             sentStats.forEach(stat => {
                 const statsEl = document.getElementById("stats-" + stat.id)
                 if (!statsEl) {
@@ -1065,7 +1072,7 @@
 
 <body>
     <header>
-        <h1>HTTP WebSocket Example</h1>
+        <h1>Samespace media server</h1>
         <p>Open the console to see the output.</p>
     </header>
     <main>
