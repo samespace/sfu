@@ -46,6 +46,7 @@ type Track struct {
 }
 
 func NewTrackRecorder(conf *TrackConfig, stream quic.SendStream) (TrackRecorder, error) {
+
 	if err := validateTrackConfig(conf); err != nil {
 		return nil, err
 	}
