@@ -289,6 +289,7 @@ func (r *Room) StartRecording(bucketName, filename string) error {
 }
 
 func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
+	fmt.Println("sending stop recording")
 	swp := r.isRecording.CompareAndSwap(true, false)
 	if !swp {
 		return
@@ -306,7 +307,7 @@ func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
 	if r.quicClient != nil {
 		r.quicClient = nil
 	}
-	r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig))
+	fmt.Println("sending datagram L: ", r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 }
 
 func (r *Room) PauseRecording() {
