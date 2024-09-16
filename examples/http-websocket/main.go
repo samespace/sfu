@@ -150,13 +150,11 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
-	roomsOpts.QuicConfig = []*recorder.QuicConfig{
-		{
-			Host:     "127.0.0.1",
-			Port:     9000,
-			CertFile: "server.cert",
-			KeyFile:  "server.key",
-		},
+	roomsOpts.RecorderConfig = &recorder.RecorderConfig{
+		Host:     "127.0.0.1",
+		Port:     9000,
+		CertFile: "server.cert",
+		KeyFile:  "server.key",
 	}
 	emptyRoomTimeout := 1 * time.Hour
 	roomsOpts.EmptyRoomTimeout = &emptyRoomTimeout
