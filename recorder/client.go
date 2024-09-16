@@ -12,7 +12,7 @@ import (
 
 type RecorderConfig struct {
 	Host     string
-	Port     int
+	Port     uint16
 	CertFile string
 	KeyFile  string
 }
