@@ -114,19 +114,11 @@
         }
     </style>
     <script type="module">
-        import { InliveVideoObserver } from './inlive-video-observer.js'
         let clientid = null
         const peerConnection = new RTCPeerConnection({
             iceServers: [
                 {
                     urls: "stun:stun.l.google.com:19302"
-                },
-                {
-                    urls: "stun:stun1.l.google.com:19302"
-                }, {
-                    urls: "stun:stun2.l.google.com:19302"
-                }, {
-                    urls: "stun:stun3.l.google.com:19302"
                 }
             ]
         });
@@ -177,7 +169,6 @@
             console.log("ondatachannel: ", e.channel.label);
             if (e.channel.label == "internal") {
                 internalChannel = e.channel;
-                videoObserver = new InliveVideoObserver(e.channel)
 
                 internalChannel.addEventListener('message', (e) => {
                     const msg = JSON.parse(e.data)
@@ -227,7 +218,7 @@
                 red = false
             }
 
-            ws = new WebSocket(`ws://35.247.181.17:8000/ws?${debug ? 'debug=1' : ''}`);
+            ws = new WebSocket(`ws://127.0.0.1:8000/ws?${debug ? 'debug=1' : ''}`);
             const promise = new Promise((resolve, reject) => {
                 ws.onopen = function () {
                     resolve()
@@ -259,7 +250,7 @@
                         console.log("client received answer", peerConnection.currentRemoteDescription)
                         negotiationNeeded = false
                     } else if (msg.type == 'candidate') {
-                        await peerConnection.addIceCandidate(msg.data);
+                        await peerConnection.addIceCandidate(JSON.parse(msg.data));
                     } else if (msg.type == 'tracks_added') {
                         console.log("on tracks added", msg.data)
                         const trackType = {}

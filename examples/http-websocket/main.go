@@ -353,11 +353,11 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	}
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		// SFU send an ICE candidate to client
+		j, _ := json.Marshal(candidate.ToJSON())
 		resp := Respose{
 			Status: true,
 			Type:   TypeCandidate,
-			Data:   candidate,
+			Data:   string(j),
 		}
 		candidateBytes, _ := json.Marshal(resp)
 
@@ -506,18 +506,22 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				respBytes, _ := json.Marshal(resp)
 				conn.Write(respBytes)
 			} else if req.Type == "start_recording" {
-				r.StartRecording("wave", client.ID()+".ogg")
+				client.StartClientRecording("wave", client.ID()+".wav")
 			} else if req.Type == "stop_recording" {
 				fmt.Println("stop recording")
-				r.StopRecording(recorder.StopConfig{
+				client.StopClientRecording(recorder.StopConfig{
 					Splits: []recorder.SplitConfig{
 						{
 							Start:    time.Duration(time.Second * 5),
 							End:      time.Duration(time.Second * 10),
-							FileName: client.ID() + startTime.Format("2006-01-02T15") + ".ogg",
+							FileName: client.ID() + startTime.Format("2006-01-02T15") + ".wav",
 						},
 					},
 				})
+			} else if req.Type == "pause_recording" {
+				client.PauseClientRecording()
+			} else if req.Type == "continue_recording" {
+				client.ContinueClientRecording()
 			} else {
 				logger.Errorf("unknown message type", req)
 			}
