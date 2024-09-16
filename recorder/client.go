@@ -10,7 +10,7 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-type QuicConfig struct {
+type RecorderConfig struct {
 	Host     string
 	Port     int
 	CertFile string
@@ -43,7 +43,7 @@ type StopConfig struct {
 	ChannelConfig ChannelConfig
 }
 
-func readCertAndKey(config *QuicConfig) *tls.Config {
+func readCertAndKey(config *RecorderConfig) *tls.Config {
 	cert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
 	if err != nil {
 		panic(err)
@@ -55,7 +55,7 @@ func readCertAndKey(config *QuicConfig) *tls.Config {
 	}
 }
 
-func NewQuicClient(ctx context.Context, clientConfig ClientConfig, config *QuicConfig) (quic.Connection, error) {
+func NewQuicClient(ctx context.Context, clientConfig ClientConfig, config *RecorderConfig) (quic.Connection, error) {
 	var conn quic.Connection
 	var err error
 

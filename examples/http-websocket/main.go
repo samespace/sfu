@@ -150,7 +150,7 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
-	roomsOpts.QuicConfig = &recorder.QuicConfig{
+	roomsOpts.RecorderConfig = &recorder.RecorderConfig{
 		Host:     "127.0.0.1",
 		Port:     9000,
 		CertFile: "server.cert",

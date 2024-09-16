@@ -88,7 +88,7 @@ type ClientOptions struct {
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
 	QuicConnection quic.Connection `json:"-"`
-	QuicConfig     *recorder.QuicConfig
+	RecorderConfig *recorder.RecorderConfig
 }
 
 type internalDataMessage struct {
@@ -626,7 +626,7 @@ func (c *Client) StartClientRecording(bucketName, filename string) error {
 				BucketName: bucketName,
 				FileName:   filename,
 			},
-			c.options.QuicConfig,
+			c.options.RecorderConfig,
 		)
 		c.quicClient = quicClient
 	}
