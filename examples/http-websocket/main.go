@@ -235,6 +235,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
+	opts.Channel = recorder.LeftChannel
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
 	client, err := r.AddClient(clientID, clientID, opts)
@@ -504,10 +505,10 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				respBytes, _ := json.Marshal(resp)
 				conn.Write(respBytes)
 			} else if req.Type == "start_recording" {
-				client.StartClientRecording("wave", client.ID()+".wav")
+				r.StartRecording("wave", r.ID()+".wav")
 			} else if req.Type == "stop_recording" {
 				fmt.Println("stop recording")
-				client.StopClientRecording(recorder.StopConfig{
+				r.StopRecording(recorder.StopConfig{
 					Splits: []recorder.SplitConfig{
 						{
 							Start:    time.Duration(time.Second * 5),
@@ -517,9 +518,9 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 					},
 				})
 			} else if req.Type == "pause_recording" {
-				client.PauseClientRecording()
+				r.PauseRecording()
 			} else if req.Type == "continue_recording" {
-				client.ContinueClientRecording()
+				r.ContinueRecording()
 			} else {
 				logger.Errorf("unknown message type", req)
 			}

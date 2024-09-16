@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -115,6 +116,31 @@ func (t *remoteTrack) readRTP() {
 					t.rtppool.PutPayload(buffer)
 					return
 				}
+
+				if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+					t.log.Warnf("remotetrack: read timeout catched: %s", readErr.Error())
+
+				}
+				/* // handle timeout
+				if readErr == io.ErrUnexpectedEOF {
+					t.log.Warnf("remotetrack: read error: %s", readErr.Error())
+					packet := &rtp.Packet{
+						Header: rtp.Header{
+							Version:        2,
+							Padding:        false,
+							Extension:      false,
+							Marker:         false,
+							PayloadType:    111, //
+							SequenceNumber: packet.SequenceNumber,
+							Timestamp:      packet.Timestamp,
+							SSRC:           packet.SSRC,
+						},
+						Payload: []byte{0xF8, 0xFF, 0xFE},
+					}
+					t.onRead(packet)
+					t.rtppool.PutPacket(packet)
+					continue
+				} */
 
 				t.log.Errorf("remotetrack: read error: %s", readErr.Error())
 				continue
