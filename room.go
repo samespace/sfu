@@ -306,6 +306,7 @@ func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
 	if r.quicClient != nil {
 		r.quicClient = nil
 	}
+	r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig))
 }
 
 func (r *Room) PauseRecording() {
