@@ -305,9 +305,9 @@ func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
 	}
 	stopConfig.ChannelConfig = chanConfig
 	if r.quicClient != nil {
+		fmt.Println("sending datagram L: ", r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 		r.quicClient = nil
 	}
-	fmt.Println("sending datagram L: ", r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 }
 
 func (r *Room) PauseRecording() {
