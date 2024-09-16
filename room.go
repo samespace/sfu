@@ -293,12 +293,17 @@ func (r *Room) StopRecording(stopConfig recorder.StopConfig) {
 	if !swp {
 		return
 	}
+	chanConfig := make(map[string]int)
+
 	for _, client := range r.sfu.clients.GetClients() {
+		clienTracks := client.Tracks()
+		for _, track := range clienTracks {
+			chanConfig[track.ID()] = int(client.options.Channel)
+		}
 		client.stopRoomRecording()
 	}
+	stopConfig.ChannelConfig = chanConfig
 	if r.quicClient != nil {
-		fmt.Println(stopConfig)
-		fmt.Println(r.quicClient.SendDatagram(serializeCloseDatagram(stopConfig)))
 		r.quicClient = nil
 	}
 }
@@ -362,6 +367,10 @@ func (r *Room) onClientLeft(client *Client) {
 func (r *Room) onClientJoined(client *Client) {
 	for _, callback := range r.onClientJoinedCallbacks {
 		callback(client)
+	}
+
+	if r.isRecording.Load() {
+		client.startRoomRecording(r.quicClient)
 	}
 
 	for _, ext := range r.extensions {

@@ -89,6 +89,7 @@ type ClientOptions struct {
 	settingEngine  webrtc.SettingEngine
 	QuicConnection quic.Connection `json:"-"`
 	RecorderConfig *recorder.RecorderConfig
+	Channel        recorder.Channel
 }
 
 type internalDataMessage struct {
@@ -189,6 +190,8 @@ type Client struct {
 	isDebug                        bool
 	vadInterceptor                 *voiceactivedetector.Interceptor
 	log                            logging.LeveledLogger
+	isRecording                    atomic.Bool
+	isRecordingPaused              atomic.Bool
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -306,8 +309,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	if err := registerInterceptors(m, i); err != nil {
 		panic(err)
 	}
-
-	fmt.Println("peerConnectionConfig", peerConnectionConfig)
 
 	// Create a new RTCPeerConnection
 	peerConnection, err := webrtc.NewAPI(webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
@@ -614,6 +615,10 @@ Creates a new quic client solely for this client.
 */
 func (c *Client) StartClientRecording(bucketName, filename string) error {
 	c.log.Infof("client: start recording")
+	swp := c.isRecording.CompareAndSwap(false, true)
+	if !swp {
+		return fmt.Errorf("recording is already started")
+	}
 
 	var quicClient quic.Connection = c.quicClient
 	var err error
@@ -647,6 +652,10 @@ func (c *Client) StartClientRecording(bucketName, filename string) error {
 }
 
 func (c *Client) StopClientRecording(stopConfig recorder.StopConfig) {
+	swp := c.isRecording.CompareAndSwap(true, false)
+	if !swp {
+		return // not recording
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.StopRecording()
 	}
@@ -657,12 +666,20 @@ func (c *Client) StopClientRecording(stopConfig recorder.StopConfig) {
 }
 
 func (c *Client) PauseClientRecording() {
+	swp := c.isRecording.CompareAndSwap(true, false)
+	if !swp {
+		return // not recording
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.PauseRecording()
 	}
 }
 
 func (c *Client) ContinueClientRecording() {
+	swp := c.isRecordingPaused.CompareAndSwap(true, false)
+	if !swp {
+		return // not paused
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.ContinueRecording()
 	}
@@ -673,6 +690,10 @@ startRoomRecording is called by the room to record the whole room
 */
 func (c *Client) startRoomRecording(conn quic.Connection) error {
 	c.log.Infof("client: start recording")
+	swp := c.isRecording.CompareAndSwap(false, true)
+	if !swp {
+		return nil // already recording
+	}
 	for _, track := range c.tracks.GetTracks() {
 		stream, err := conn.OpenUniStream()
 		if err != nil {
@@ -685,18 +706,30 @@ func (c *Client) startRoomRecording(conn quic.Connection) error {
 }
 
 func (c *Client) stopRoomRecording() {
+	swp := c.isRecording.CompareAndSwap(true, false)
+	if !swp {
+		return // not recording
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.StopRecording()
 	}
 }
 
 func (c *Client) pauseRoomRecording() {
+	swp := c.isRecordingPaused.CompareAndSwap(false, true)
+	if !swp {
+		return // already paused
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.PauseRecording()
 	}
 }
 
 func (c *Client) continueRoomRecording() {
+	swp := c.isRecordingPaused.CompareAndSwap(true, false)
+	if !swp {
+		return // not paused
+	}
 	for _, track := range c.tracks.GetTracks() {
 		track.ContinueRecording()
 	}
