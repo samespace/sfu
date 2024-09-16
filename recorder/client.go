@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -42,10 +41,6 @@ type ChannelConfig map[string]int
 type StopConfig struct {
 	Splits        []SplitConfig
 	ChannelConfig ChannelConfig
-}
-
-func GetRandomQuicClient(clientConfig ClientConfig, config []*QuicConfig) (quic.Connection, error) {
-	return NewQuicClient(context.Background(), clientConfig, config[rand.Intn(len(config))])
 }
 
 func readCertAndKey(config *QuicConfig) *tls.Config {

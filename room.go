@@ -93,7 +93,7 @@ type RoomOptions struct {
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
 	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,omitempty" example:"300000000000" default:"300000000000"`
 	// Configure the quic configuration for recording
-	QuicConfig []*recorder.QuicConfig `json:"quic_config,omitempty"`
+	QuicConfig *recorder.QuicConfig `json:"quic_config,omitempty"`
 }
 
 func DefaultRoomOptions() RoomOptions {
@@ -268,7 +268,8 @@ func (r *Room) StartRecording(bucketName, filename string) error {
 	var quicClient quic.Connection = r.quicClient
 	var err error
 	if quicClient == nil {
-		quicClient, err = recorder.GetRandomQuicClient(
+		quicClient, err = recorder.NewQuicClient(
+			context.Background(),
 			recorder.ClientConfig{
 				ClientId:   r.id,
 				BucketName: bucketName,
