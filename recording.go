@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -24,6 +25,8 @@ import (
 
 const (
 	silencePacketDetectionThreshold = 500 * time.Millisecond
+	uploadRetryAttempts             = 3
+	uploadRetryDelay                = 5 * time.Second
 )
 
 type ChannelType int
@@ -94,13 +97,14 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	if r.recordingSession != nil {
 		return "", fmt.Errorf("recording already in progress")
 	}
-	id := uuid.New().String()
+	startTime := time.Now()
+	id := fmt.Sprintf("%d_%s", startTime.Unix(), uuid.New().String())
 	session := &recordingSession{
 		id:      id,
 		cfg:     cfg,
 		writers: make(map[string]map[string]*trackWriter),
 	}
-	session.meta.StartTime = time.Now()
+	session.meta.StartTime = startTime
 
 	baseDir := filepath.Join(cfg.BasePath, id)
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
@@ -467,6 +471,15 @@ func (r *Room) ResumeRecording() error {
 	}
 	r.recordingSession.mu.Lock()
 	r.recordingSession.paused = false
+
+	for _, writerMap := range r.recordingSession.writers {
+		for _, tw := range writerMap {
+			tw.mu.Lock()
+			tw.lastPacketTime = time.Now()
+			tw.mu.Unlock()
+		}
+	}
+
 	r.recordingSession.meta.Events = append(r.recordingSession.meta.Events, Event{Type: "resume", Time: time.Now(), Data: nil})
 	r.recordingSession.mu.Unlock()
 	return nil
@@ -593,6 +606,50 @@ func (r *Room) StopRecording() error {
 // mergeAndUpload mixes per-channel recordings, merges stereo, uploads to S3, and removes local files.
 func (r *Room) mergeAndUpload(session *recordingSession) error {
 	baseDir := filepath.Join(session.cfg.BasePath, session.id)
+
+	logPath := filepath.Join(baseDir, "error.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Printf("error creating log file %s: %v\n", logPath, err)
+	}
+	if logFile != nil {
+		defer logFile.Close()
+	}
+
+	logError := func(format string, v ...interface{}) {
+		msg := fmt.Sprintf(format, v...)
+		fmt.Println(msg) // also print to stdout
+		if logFile != nil {
+			logFile.WriteString(time.Now().Format(time.RFC3339) + " " + msg + "\n")
+		}
+	}
+
+	retry := func(attempts int, sleep time.Duration, fn func() error) error {
+		var err error
+		for i := 0; i < attempts; i++ {
+			if i > 0 {
+				logError("Retrying operation, attempt %d/%d...", i+1, attempts)
+				time.Sleep(sleep)
+			}
+			err = fn()
+			if err == nil {
+				return nil
+			}
+			logError("Operation failed (attempt %d/%d): %v", i+1, attempts, err)
+		}
+		return fmt.Errorf("after %d attempts, last error: %w", attempts, err)
+	}
+
+	runCmdWithRetry := func(name string, args ...string) error {
+		return retry(uploadRetryAttempts, uploadRetryDelay, func() error {
+			cmd := exec.Command(name, args...)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("command '%s %v' failed: %w, output: %s", name, args, err, string(out))
+			}
+			return nil
+		})
+	}
+
 	// Group track files by channel
 	filesByChannel := map[ChannelType][]string{}
 	for clientID, writerMap := range session.writers {
@@ -613,16 +670,22 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 			src := inputs[0]
 			inF, err := os.Open(src)
 			if err != nil {
-				return fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				logError(err.Error())
+				return err
 			}
 			defer inF.Close()
 			outF, err := os.Create(monoPath)
 			if err != nil {
-				return fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				logError(err.Error())
+				return err
 			}
 			defer outF.Close()
 			if _, err := io.Copy(outF, inF); err != nil {
-				return fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
+				logError(err.Error())
+				return err
 			}
 			monoFiles[ch] = monoPath
 			continue
@@ -633,9 +696,10 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		}
 		filter := fmt.Sprintf("amix=inputs=%d:duration=longest", len(inputs))
 		args = append(args, "-filter_complex", filter, "-ac", "1", monoPath)
-		cmd := exec.Command("ffmpeg", args...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("ffmpeg mix channel %d failed: %v, output: %s", ch, err, string(out))
+		if err := runCmdWithRetry("ffmpeg", args...); err != nil {
+			err = fmt.Errorf("ffmpeg mix channel %d failed: %w", ch, err)
+			logError(err.Error())
+			return err
 		}
 		monoFiles[ch] = monoPath
 	}
@@ -644,9 +708,11 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	left, hasLeft := monoFiles[ChannelOne]
 	right, hasRight := monoFiles[ChannelTwo]
 	if hasLeft && hasRight {
-		cmd := exec.Command("ffmpeg", "-y", "-i", left, "-i", right, "-filter_complex", "amerge=inputs=2", "-ac", "2", finalPath)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("ffmpeg merge stereo failed: %v, output: %s", err, string(out))
+		args := []string{"-y", "-i", left, "-i", right, "-filter_complex", "amerge=inputs=2", "-ac", "2", finalPath}
+		if err := runCmdWithRetry("ffmpeg", args...); err != nil {
+			err = fmt.Errorf("ffmpeg merge stereo failed: %w", err)
+			logError(err.Error())
+			return err
 		}
 	} else if hasLeft || hasRight {
 		src := left
@@ -654,19 +720,25 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 			src = right
 		}
 		if err := os.Rename(src, finalPath); err != nil {
+			logError("failed to rename mono file: %v", err)
 			return err
 		}
 	} else {
-		return fmt.Errorf("no audio to merge")
+		err := fmt.Errorf("no audio to merge")
+		logError(err.Error())
+		return err
 	}
 	// Convert merged .ogg to .m4a
 	m4aPath := filepath.Join(baseDir, session.id+".m4a")
-	cmd := exec.Command("ffmpeg", "-y", "-i", finalPath, "-c:a", "aac", "-b:a", "32k", m4aPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg convert to m4a failed: %v, output: %s", err, string(out))
+	args := []string{"-y", "-i", finalPath, "-c:a", "aac", "-b:a", "32k", m4aPath}
+	if err := runCmdWithRetry("ffmpeg", args...); err != nil {
+		err = fmt.Errorf("ffmpeg convert to m4a failed: %w", err)
+		logError(err.Error())
+		return err
 	}
+
 	if err := os.Remove(finalPath); err != nil {
-		fmt.Printf("warning: failed to remove merged ogg: %v", err)
+		logError("warning: failed to remove merged ogg: %v", err)
 	}
 	finalPath = m4aPath
 
@@ -676,14 +748,20 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		Secure: session.cfg.S3.Secure,
 	})
 	if err != nil {
-		fmt.Printf("error creating minio client: %v", err)
+		logError("error creating minio client: %v", err)
 		return err
 	}
-	object := filepath.Join(session.cfg.S3.FilePrefix, session.id+".m4a")
+	dateStr := session.meta.StartTime.Format("02-01-2006")
+	object := path.Join(session.cfg.S3.FilePrefix, dateStr, session.id+".m4a")
 	ctx := context.Background()
-	_, err = mc.FPutObject(ctx, session.cfg.S3.Bucket, object, finalPath, minio.PutObjectOptions{ContentType: "audio/mp4"})
-	if err != nil {
-		fmt.Printf("error uploading to s3: %v", err)
+
+	uploadFn := func() error {
+		_, err := mc.FPutObject(ctx, session.cfg.S3.Bucket, object, finalPath, minio.PutObjectOptions{ContentType: "audio/mp4"})
+		return err
+	}
+
+	if err := retry(uploadRetryAttempts, uploadRetryDelay, uploadFn); err != nil {
+		logError("s3 upload failed after all retries: %v", err)
 		return err
 	}
 
