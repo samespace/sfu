@@ -73,20 +73,18 @@ type bufferedPacket struct {
 }
 
 type trackWriter struct {
-	writer                       *oggwriter.OggWriter
-	lastRTPTimestamp             uint32
-	actualPacketLastRTPTimestamp uint32
-	lastSeqNum                   uint16
-	clockRate                    uint32
-	lastPacketTime               time.Time
-	mu                           sync.Mutex
+	writer           *oggwriter.OggWriter
+	lastRTPTimestamp uint32
+	lastSeqNum       uint16
+	clockRate        uint32
+	lastPacketTime   time.Time
+	mu               sync.Mutex
 
 	// Buffering fields
 	packetBuffer       chan bufferedPacket
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
 	ssrc               uint32
-	firstPacket        bool
 	recordingStartTime time.Time
 }
 
@@ -184,9 +182,10 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		tw := &trackWriter{
 			writer:             ow,
 			clockRate:          sampleRate,
-			lastRTPTimestamp:   0,
-			lastSeqNum:         0,
-			firstPacket:        true,
+			lastRTPTimestamp:   uint32(rand.IntN(1 << 32)),      // Random initial timestamp
+			lastSeqNum:         uint16(rand.IntN(1 << 16)),      // Random initial sequence number
+			ssrc:               uint32(rand.IntN(1 << 32)),      // Random SSRC
+			lastPacketTime:     session.meta.StartTime,          // Initialize to recording start time
 			packetBuffer:       make(chan bufferedPacket, 1000), // Buffer up to 1000 packets
 			stopChan:           make(chan struct{}),
 			recordingStartTime: session.meta.StartTime,
@@ -332,100 +331,35 @@ func (tw *trackWriter) processBatch(batch []bufferedPacket) {
 		// Calculate samples per packet (20ms worth)
 		samplesPerPacket := uint32(tw.clockRate * 20 / 1000)
 
-		// Initialize on first packet
-		if tw.firstPacket {
-			tw.lastSeqNum = uint16(rand.IntN(1 << 16))
-			tw.lastRTPTimestamp = pkt.Timestamp
-			tw.actualPacketLastRTPTimestamp = pkt.Timestamp
-			tw.ssrc = pkt.SSRC
-			tw.firstPacket = false
+		// Use wall-clock time to determine actual mute duration
+		muteDuration := bp.arrivalTime.Sub(tw.lastPacketTime)
 
-			// Check if client started muted (gap between recording start and first packet)
-			recordingStartTime := tw.recordingStartTime
-			if !recordingStartTime.IsZero() {
-				startGap := bp.arrivalTime.Sub(recordingStartTime)
+		// Only insert silence if the gap is significant (> 500ms)
+		// This avoids inserting silence for small processing delays
+		if muteDuration > silencePacketDetectionThreshold {
+			// Calculate number of silent packets needed
+			numSilentPackets := int(muteDuration.Milliseconds() / 20)
 
-				// If the first packet arrives significantly after recording started
-				if startGap > silencePacketDetectionThreshold {
-					numSilentPackets := int(startGap.Milliseconds() / 20)
+			// Insert silence packets
+			for i := 0; i < numSilentPackets; i++ {
+				tw.lastSeqNum++
+				tw.lastRTPTimestamp += samplesPerPacket
 
-					fmt.Printf("Client started muted - filling %d silence packets at start (gap: %v)\n",
-						numSilentPackets, startGap)
-
-					// Adjust starting timestamp to account for silence
-					tw.lastRTPTimestamp = pkt.Timestamp - uint32(numSilentPackets)*samplesPerPacket
-
-					// Insert silence packets from recording start
-					for i := 0; i < numSilentPackets; i++ {
-						opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
-						silentPkt := &rtp.Packet{
-							Header: rtp.Header{
-								Version:        2,
-								PayloadType:    111,
-								SequenceNumber: tw.lastSeqNum,
-								Timestamp:      tw.lastRTPTimestamp,
-								SSRC:           tw.ssrc,
-							},
-							Payload: opusSilence,
-						}
-
-						if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
-							fmt.Printf("error writing start silence packet: %v", err)
-							continue
-						}
-
-						tw.lastSeqNum++
-						tw.lastRTPTimestamp += samplesPerPacket
-					}
+				opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
+				silentPkt := &rtp.Packet{
+					Header: rtp.Header{
+						Version:        2,
+						PayloadType:    111,
+						SequenceNumber: tw.lastSeqNum,
+						Timestamp:      tw.lastRTPTimestamp,
+						SSRC:           tw.ssrc,
+					},
+					Payload: opusSilence,
 				}
-			}
 
-			tw.lastPacketTime = bp.arrivalTime
-
-			// Write the first actual packet
-			actualPkt := *pkt
-			actualPkt.SequenceNumber = tw.lastSeqNum
-			actualPkt.Timestamp = tw.lastRTPTimestamp
-
-			if err := writeRTPWithSamples(tw.writer, &actualPkt, uint64(samplesPerPacket)); err != nil {
-				fmt.Printf("error writing first packet: %v", err)
-			}
-
-			tw.lastSeqNum++
-			continue
-		}
-
-		if !tw.lastPacketTime.IsZero() {
-			// Use wall-clock time to determine actual mute duration
-			muteDuration := bp.arrivalTime.Sub(tw.lastPacketTime)
-
-			// Only insert silence if the gap is significant (> 100ms)
-			// This avoids inserting silence for small processing delays
-			if muteDuration > silencePacketDetectionThreshold {
-				// Calculate number of silent packets needed
-				numSilentPackets := int(muteDuration.Milliseconds() / 20)
-
-				// Insert silence packets
-				for i := 0; i < numSilentPackets; i++ {
-					tw.lastSeqNum++
-					tw.lastRTPTimestamp += samplesPerPacket
-
-					opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
-					silentPkt := &rtp.Packet{
-						Header: rtp.Header{
-							Version:        2,
-							PayloadType:    111,
-							SequenceNumber: tw.lastSeqNum,
-							Timestamp:      tw.lastRTPTimestamp,
-							SSRC:           tw.ssrc,
-						},
-						Payload: opusSilence,
-					}
-
-					if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
-						fmt.Printf("error writing silent packet: %v", err)
-						continue
-					}
+				if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
+					fmt.Printf("error writing silent packet: %v", err)
+					continue
 				}
 			}
 		}
@@ -443,7 +377,6 @@ func (tw *trackWriter) processBatch(batch []bufferedPacket) {
 		}
 
 		// Update tracking variables
-		tw.actualPacketLastRTPTimestamp = pkt.Timestamp
 		tw.lastPacketTime = bp.arrivalTime
 	}
 }
