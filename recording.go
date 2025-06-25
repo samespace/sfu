@@ -471,15 +471,6 @@ func (r *Room) ResumeRecording() error {
 	}
 	r.recordingSession.mu.Lock()
 	r.recordingSession.paused = false
-
-	for _, writerMap := range r.recordingSession.writers {
-		for _, tw := range writerMap {
-			tw.mu.Lock()
-			tw.lastPacketTime = time.Now()
-			tw.mu.Unlock()
-		}
-	}
-
 	r.recordingSession.meta.Events = append(r.recordingSession.meta.Events, Event{Type: "resume", Time: time.Now(), Data: nil})
 	r.recordingSession.mu.Unlock()
 	return nil
@@ -517,53 +508,52 @@ func (r *Room) StopRecording() error {
 	}
 
 	// Fill silence for any tracks that were muted when recording stopped, if it was not paused
-	if !session.paused {
-		for clientID, writerMap := range session.writers {
-			for trackID, tw := range writerMap {
-				tw.mu.Lock()
+	for clientID, writerMap := range session.writers {
+		for trackID, tw := range writerMap {
+			tw.mu.Lock()
 
-				// Check if there's a gap between last packet and recording stop time
-				if !tw.lastPacketTime.IsZero() {
-					gapDuration := session.meta.StopTime.Sub(tw.lastPacketTime)
+			// Check if there's a gap between last packet and recording stop time
+			if !tw.lastPacketTime.IsZero() {
+				gapDuration := session.meta.StopTime.Sub(tw.lastPacketTime)
 
-					// If gap is significant (> 100ms), fill with silence
-					if gapDuration > silencePacketDetectionThreshold {
-						samplesPerPacket := uint32(tw.clockRate * 20 / 1000)
-						numSilentPackets := int(gapDuration.Milliseconds() / 20)
+				// If gap is significant (> 100ms), fill with silence
+				if gapDuration > silencePacketDetectionThreshold {
+					samplesPerPacket := uint32(tw.clockRate * 20 / 1000)
+					numSilentPackets := int(gapDuration.Milliseconds() / 20)
 
-						fmt.Printf("Filling %d silence packets at end for client %s track %s (gap: %v)",
-							numSilentPackets, clientID, trackID, gapDuration)
+					fmt.Printf("Filling %d silence packets at end for client %s track %s (gap: %v)",
+						numSilentPackets, clientID, trackID, gapDuration)
 
-						// Insert silence packets to fill the gap to recording end
-						for i := 0; i < numSilentPackets; i++ {
-							tw.lastSeqNum++
-							tw.lastRTPTimestamp += samplesPerPacket
+					// Insert silence packets to fill the gap to recording end
+					for i := 0; i < numSilentPackets; i++ {
+						tw.lastSeqNum++
+						tw.lastRTPTimestamp += samplesPerPacket
 
-							opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
-							silentPkt := &rtp.Packet{
-								Header: rtp.Header{
-									Version:        2,
-									PayloadType:    111,
-									SequenceNumber: tw.lastSeqNum,
-									Timestamp:      tw.lastRTPTimestamp,
-									SSRC:           tw.ssrc,
-								},
-								Payload: opusSilence,
-							}
+						opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
+						silentPkt := &rtp.Packet{
+							Header: rtp.Header{
+								Version:        2,
+								PayloadType:    111,
+								SequenceNumber: tw.lastSeqNum,
+								Timestamp:      tw.lastRTPTimestamp,
+								SSRC:           tw.ssrc,
+							},
+							Payload: opusSilence,
+						}
 
-							if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
-								fmt.Printf("error writing end silence for client %s track %s: %v",
-									clientID, trackID, err)
-								break
-							}
+						if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
+							fmt.Printf("error writing end silence for client %s track %s: %v",
+								clientID, trackID, err)
+							break
 						}
 					}
 				}
-
-				tw.mu.Unlock()
 			}
+
+			tw.mu.Unlock()
 		}
 	}
+
 	session.mu.Unlock()
 
 	fmt.Printf("closing writers: %s", session.id)
