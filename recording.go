@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	silencePacketDetectionThreshold = 500 * time.Millisecond
+	silencePacketDetectionThreshold = 100 * time.Millisecond
 	uploadRetryAttempts             = 3
 	uploadRetryDelay                = 5 * time.Second
 )
