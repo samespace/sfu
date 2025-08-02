@@ -148,11 +148,11 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// silence branch ensures data is still written, so the output duration equals
 		// wall-clock session length.
 		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
-  audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! oggmux ! filesink location="%s" \ \
   audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix. \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
     rtpjitterbuffer ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! queue ! mix. \
-  audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! oggmux ! filesink location="%s"`, port, filePath)
+  audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! \
+    oggmux ! filesink location="%s"`, port, filePath)
 		cmd := exec.Command("sh", "-c", pipeline)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
