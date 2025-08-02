@@ -147,7 +147,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// When the RTP branch delivers no packets (e.g., during PauseRecording), the
 		// silence branch ensures data is still written, so the output duration equals
 		// wall-clock session length.
-		pipeline := fmt.Sprintf(`gst-launch-1.0 -q \
+		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
   audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix. \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
     rtpjitterbuffer ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! queue ! mix. \
