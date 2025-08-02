@@ -154,8 +154,9 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
   audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! \
     oggmux ! filesink location="%s"`, port, filePath)
 		cmd := exec.Command("sh", "-c", pipeline)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0644)
+		cmd.Stdout = devnull
+		cmd.Stderr = devnull
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("failed to start GStreamer pipeline: %w", err)
 		}
@@ -276,7 +277,20 @@ func (r *Room) StopRecording() error {
 				// Attempt graceful shutdown
 				rec.cmd.Process.Signal(syscall.SIGINT)
 				done := make(chan error, 1)
-				go func(cmd *exec.Cmd) { done <- cmd.Wait() }(rec.cmd)
+				go func(cmd *exec.Cmd) {
+					if err := cmd.Wait(); err != nil {
+						// Ignore interrupt signal errors
+						if exitErr, ok := err.(*exec.ExitError); ok {
+							if exitErr.ExitCode() == -1 {
+								done <- nil
+								return
+							}
+						}
+						done <- err
+					} else {
+						done <- nil
+					}
+				}(rec.cmd)
 				select {
 				case <-done:
 				case <-time.After(30 * time.Second):
