@@ -142,27 +142,18 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return fmt.Errorf("failed to allocate UDP port: %w", err)
 		}
 
-		// 		gst-launch-1.0 -e \
-		//   udpsrc port=5004 caps="application/x-rtp, media=audio, encoding-name=OPUS, payload=111, clock-rate=48000" ! \
-		//   rtpjitterbuffer ! \
-		//   rtpopusdepay ! \
-		//   opusdec ! \
-		//   audioconvert ! \
-		//   audioresample ! \
-		//   wavenc ! \
-		//   filesink location=output.wav
+		//  audiomixer name=mix ! audioconvert ! audioresample ! wavenc ! filesink location=output.wav
+		// udpsrc port=5004 caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" !
+		//     rtpjitterbuffer do-lost=true ! rtpopusdepay ! opusdec ! queue ! mix.
+		// audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix.
 
 		// Create the pipeline
 		pipelineStr := fmt.Sprintf(`
+		audiomixer name=mix ! audioconvert ! audioresample ! wavenc ! filesink location=%s
 		udpsrc port=%d caps=application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000 !
-		rtpjitterbuffer !
-		rtpopusdepay !
-		opusdec !
-		audioconvert !
-		audioresample !
-		wavenc !
-		filesink location=%s
-	`, port, filePath)
+		rtpjitterbuffer do-lost=true ! rtpopusdepay ! opusdec ! queue ! mix.
+		audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix.
+	`, filePath, port)
 
 		pipeline, err := gst.ParseLaunch(pipelineStr)
 		if err != nil || pipeline == nil {
