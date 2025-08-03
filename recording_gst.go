@@ -163,11 +163,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// Dial UDP connection to send RTP packets
 		conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
 		if err != nil {
-			err := cmd.Process.Signal(os.Interrupt)
-			if err != nil {
-				fmt.Println("(stopRecording) error stopping recorder", err)
-			}
-			fmt.Println("(stopRecording) recorder stopped", cmd.Process.Pid)
 			return fmt.Errorf("failed to dial UDP: %w", err)
 		}
 
@@ -176,7 +171,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		// Forward RTP packets to the UDP connection
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
-			if session.paused || session.stopped {
+			if session.paused || session.stopped || recorder.conn == nil {
 				return
 			}
 			data, err := pkt.Marshal()
@@ -196,24 +191,10 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 				return
 			}
 
-			if rec.cmd != nil && rec.cmd.Process != nil {
-				// Attempt graceful shutdown
-				fmt.Println("stopping recorder for track", track.ID())
-				err := rec.cmd.Process.Signal(os.Interrupt)
-				if err != nil {
-					fmt.Println("(stopRecording) error stopping recorder", err)
-				}
-				fmt.Println("(stopRecording) recorder stopped", rec.cmd.Process.Pid)
-			}
-
 			if rec.conn != nil {
 				rec.conn.Close()
+				rec.conn = nil
 			}
-
-			// Intentionally keep recorder entry so StopRecording() can locate the
-			// generated file paths later when it calls mergeAndUpload. The object
-			// retains only lightweight pointers and is cleared after StopRecording
-			// completes.
 		})
 
 		return nil
@@ -303,18 +284,15 @@ func (r *Room) StopRecording() error {
 	session.mu.Lock()
 	for _, recorderMap := range session.writers {
 		for _, rec := range recorderMap {
-			if rec.cmd != nil && rec.cmd.Process != nil {
-				fmt.Println("(stopRecording) stopping recorder for track", rec.cmd.Process.Pid)
-				// Attempt graceful shutdown
-				err := rec.cmd.Process.Signal(os.Interrupt)
-				if err != nil {
-					fmt.Println("(stopRecording) error stopping recorder", err)
-				}
-				fmt.Println("(stopRecording) recorder stopped", rec.cmd.Process.Pid)
-			}
-
 			if rec.conn != nil {
 				rec.conn.Close()
+			}
+
+			// Stop the pipeline process
+			if rec.cmd != nil && rec.cmd.Process != nil {
+				if err := rec.cmd.Process.Signal(os.Interrupt); err != nil {
+					fmt.Printf("error stopping recorder: %v\n", err)
+				}
 			}
 		}
 	}
@@ -335,11 +313,11 @@ func (r *Room) StopRecording() error {
 	}
 
 	// Merge channels and upload to S3 in background
-	go func() {
-		if err := r.mergeAndUpload(session); err != nil {
-			fmt.Printf("error merging and uploading: %v", err)
-		}
-	}()
+	// go func() {
+	// 	if err := r.mergeAndUpload(session); err != nil {
+	// 		fmt.Printf("error merging and uploading: %v", err)
+	// 	}
+	// }()
 
 	r.recordingMu.Lock()
 	r.recordingSession = nil
