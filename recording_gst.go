@@ -11,11 +11,8 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
-
+	"syscall"
 	"time"
-
-	_ "github.com/go-gst/go-glib/glib"
-	gst "github.com/go-gst/go-gst/gst"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -53,17 +50,9 @@ type RecordingConfig struct {
 	S3             S3Config
 }
 
-var gstInitOnce sync.Once
-
-func ensureGStreamerInit() {
-	gstInitOnce.Do(func() {
-		gst.Init(nil)
-	})
-}
-
 type trackRecorder struct {
-	conn     net.Conn
-	pipeline *gst.Pipeline
+	conn net.Conn
+	cmd  *exec.Cmd
 }
 
 type recordingSession struct {
@@ -82,7 +71,6 @@ type recordingSession struct {
 
 // StartRecording begins recording audio tracks in the room using GStreamer.
 func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
-	ensureGStreamerInit()
 	r.recordingMu.Lock()
 	defer r.recordingMu.Unlock()
 
@@ -159,42 +147,28 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// When the RTP branch delivers no packets (e.g., during PauseRecording), the
 		// silence branch ensures data is still written, so the output duration equals
 		// wall-clock session length.
-		// Build and start the GStreamer pipeline using go-gst.
-		pipelineStr := fmt.Sprintf(`audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix. \
+		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
+  audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix. \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
     rtpjitterbuffer ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! queue ! mix. \
   audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! \
     oggmux ! filesink location="%s"`, port, filePath)
-
-		pl, err := gst.NewPipelineFromString(pipelineStr)
-		if err != nil {
-			return fmt.Errorf("failed to create GStreamer pipeline: %w", err)
+		cmd := exec.Command("sh", "-c", pipeline)
+		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0644)
+		cmd.Stdout = devnull
+		cmd.Stderr = devnull
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start GStreamer pipeline: %w", err)
 		}
-		pipeline := pl
-		if err := pipeline.SetState(gst.StatePlaying); err != nil {
-			pipeline.Unref()
-			return fmt.Errorf("failed to set pipeline to playing: %w", err)
-		}
-
-		// Watch for errors on the bus
-		bus := pipeline.GetPipelineBus()
-		bus.AddWatch(func(msg *gst.Message) bool {
-			if msg.Type() == gst.MessageError {
-				gErr := msg.ParseError()
-				fmt.Println("GStreamer pipeline error:", gErr.Error())
-			}
-			return true
-		})
 
 		// Dial UDP connection to send RTP packets
 		conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
 		if err != nil {
-			pipeline.SetState(gst.StateNull)
-			pipeline.Unref()
+			cmd.Process.Kill()
 			return fmt.Errorf("failed to dial UDP: %w", err)
 		}
 
-		recorder := &trackRecorder{conn: conn, pipeline: pipeline}
+		recorder := &trackRecorder{conn: conn, cmd: cmd}
 		session.writers[clientID][track.ID()] = recorder
 
 		// Forward RTP packets to the UDP connection
@@ -204,8 +178,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			}
 			data, err := pkt.Marshal()
 			if err != nil {
-				recorder.pipeline.SetState(gst.StateNull)
-				recorder.pipeline.Unref()
 				return
 			}
 			_, _ = conn.Write(data)
@@ -301,9 +273,29 @@ func (r *Room) StopRecording() error {
 			if rec.conn != nil {
 				rec.conn.Close()
 			}
-			if rec.pipeline != nil {
-				rec.pipeline.SetState(gst.StateNull)
-				rec.pipeline.Unref()
+			if rec.cmd != nil && rec.cmd.Process != nil {
+				// Attempt graceful shutdown
+				rec.cmd.Process.Signal(syscall.SIGINT)
+				done := make(chan error, 1)
+				go func(cmd *exec.Cmd) {
+					if err := cmd.Wait(); err != nil {
+						// Ignore interrupt signal errors
+						if exitErr, ok := err.(*exec.ExitError); ok {
+							if exitErr.ExitCode() == -1 {
+								done <- nil
+								return
+							}
+						}
+						done <- err
+					} else {
+						done <- nil
+					}
+				}(rec.cmd)
+				select {
+				case <-done:
+				case <-time.After(30 * time.Second):
+					rec.cmd.Process.Kill()
+				}
 			}
 		}
 	}
