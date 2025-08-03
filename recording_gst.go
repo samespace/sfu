@@ -134,7 +134,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		if err := os.MkdirAll(trackDir, 0755); err != nil {
 			return err
 		}
-		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.opus", track.ID()))
+		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.ogg", track.ID()))
 
 		// Allocate a UDP port for this recorder
 		port, err := getFreeUDPPort()
@@ -314,16 +314,16 @@ func (r *Room) StopRecording() error {
 		return err
 	}
 
+	// Merge channels and upload to S3 in background
+	go func() {
+		if err := r.mergeAndUpload(session); err != nil {
+			fmt.Printf("error merging and uploading: %v", err)
+		}
+	}()
+
 	r.recordingMu.Lock()
 	r.recordingSession = nil
 	r.recordingMu.Unlock()
-
-	// Merge channels and upload to S3 in background
-	// go func() {
-	// 	if err := r.mergeAndUpload(session); err != nil {
-	// 		fmt.Printf("error merging and uploading: %v", err)
-	// 	}
-	// }()
 
 	return nil
 }
