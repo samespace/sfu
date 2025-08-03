@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,13 +146,12 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// Simple pipeline without timeouts - we'll control when it stops.
 		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
-    rtpjitterbuffer do-lost=true ! \
-    rtpopusdepay ! opusdec ! audioconvert ! audioresample ! \
-    opusenc bitrate=32000 ! oggmux ! filesink location="%s"`, port, filePath)
-		cmd := exec.Command("sh", "-c", pipeline)
-		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0644)
-		cmd.Stdout = devnull
-		cmd.Stderr = devnull
+  rtpjitterbuffer do-lost=true ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! \
+  opusenc bitrate=32000 ! oggmux ! filesink location="%s"`, port, filePath)
+
+		cmd := exec.Command("bash", "-c", pipeline)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // allows killing the full process group
+
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("failed to start GStreamer pipeline: %w", err)
 		}
@@ -285,24 +285,21 @@ func (r *Room) StopRecording() error {
 				rec.conn.Close()
 			}
 
+			fmt.Println("stopping gst pipeline for track", rec.cmd.Process.Pid)
+
 			// Stop the pipeline process
 			if rec.cmd != nil && rec.cmd.Process != nil {
-				if err := rec.cmd.Process.Signal(os.Interrupt); err != nil {
-					fmt.Printf("error stopping recorder: %v\n", err)
+				// Send SIGINT to the entire process group (flush and finalize)
+				err := syscall.Kill(-rec.cmd.Process.Pid, syscall.SIGINT)
+				if err != nil {
+					return fmt.Errorf("failed to send SIGINT: %w", err)
 				}
-				// Wait for process to exit with timeout
-				done := make(chan error, 1)
-				go func() {
-					done <- rec.cmd.Wait()
-				}()
-				select {
-				case <-done:
-					// Process exited normally
-				case <-time.After(5 * time.Second):
-					// Force kill if it doesn't exit gracefully
-					rec.cmd.Process.Kill()
-				}
+
+				// Wait for pipeline to exit cleanly
+				return rec.cmd.Wait()
 			}
+
+			fmt.Println("gst pipeline stopped for track", rec.cmd.Process.Pid)
 		}
 	}
 	session.mu.Unlock()
