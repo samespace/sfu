@@ -183,6 +183,43 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			_, _ = conn.Write(data)
 		})
 
+		// Stop recorder when the track ends
+		track.OnEnded(func() {
+			session.mu.Lock()
+			defer session.mu.Unlock()
+
+			rec, ok := session.writers[clientID][track.ID()]
+			if !ok {
+				return
+			}
+
+			if rec.conn != nil {
+				rec.conn.Close()
+			}
+			if rec.cmd != nil && rec.cmd.Process != nil {
+				// Attempt graceful shutdown
+				rec.cmd.Process.Signal(syscall.SIGINT)
+				go func(cmd *exec.Cmd) {
+					done := make(chan struct{})
+					go func() {
+						_ = cmd.Wait()
+						close(done)
+					}()
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						cmd.Process.Kill()
+					}
+				}(rec.cmd)
+			}
+
+			// Remove recorder from session map
+			delete(session.writers[clientID], track.ID())
+			if len(session.writers[clientID]) == 0 {
+				delete(session.writers, clientID)
+			}
+		})
+
 		return nil
 	}
 
