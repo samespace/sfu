@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -198,19 +197,8 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			}
 			if rec.cmd != nil && rec.cmd.Process != nil {
 				// Attempt graceful shutdown
-				rec.cmd.Process.Signal(syscall.SIGINT)
-				go func(cmd *exec.Cmd) {
-					done := make(chan struct{})
-					go func() {
-						_ = cmd.Wait()
-						close(done)
-					}()
-					select {
-					case <-done:
-					case <-time.After(5 * time.Second):
-						cmd.Process.Kill()
-					}
-				}(rec.cmd)
+				fmt.Println("stopping recorder for track", track.ID())
+				rec.cmd.Process.Signal(os.Interrupt)
 			}
 
 			// Intentionally keep recorder entry so StopRecording() can locate the
@@ -310,28 +298,9 @@ func (r *Room) StopRecording() error {
 				rec.conn.Close()
 			}
 			if rec.cmd != nil && rec.cmd.Process != nil {
+				fmt.Println("(stopRecording) stopping recorder for track", rec.cmd.Process.Pid)
 				// Attempt graceful shutdown
-				rec.cmd.Process.Signal(syscall.SIGINT)
-				done := make(chan error, 1)
-				go func(cmd *exec.Cmd) {
-					if err := cmd.Wait(); err != nil {
-						// Ignore interrupt signal errors
-						if exitErr, ok := err.(*exec.ExitError); ok {
-							if exitErr.ExitCode() == -1 {
-								done <- nil
-								return
-							}
-						}
-						done <- err
-					} else {
-						done <- nil
-					}
-				}(rec.cmd)
-				select {
-				case <-done:
-				case <-time.After(30 * time.Second):
-					rec.cmd.Process.Kill()
-				}
+				rec.cmd.Process.Signal(os.Interrupt)
 			}
 		}
 	}
