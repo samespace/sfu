@@ -142,16 +142,12 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		// Build and start the GStreamer pipeline.
-		// This pipeline keeps a continuous clock by mixing an always-running silence source.
-		// When the RTP branch delivers no packets (e.g., during PauseRecording), the
-		// silence branch ensures data is still written, so the output duration equals
-		// wall-clock session length.
+		// Simple pipeline without timeouts - we'll control when it stops.
 		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
-  audiotestsrc wave=silence is-live=true ! audio/x-raw,rate=48000,channels=1 ! queue ! mix. \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
-    rtpjitterbuffer ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! queue ! mix. \
-  audiomixer name=mix ! audioconvert ! audioresample ! opusenc bitrate=32000 ! \
-    oggmux ! filesink location="%s"`, port, filePath)
+    rtpjitterbuffer do-lost=true ! \
+    rtpopusdepay ! opusdec ! audioconvert ! audioresample ! \
+    opusenc bitrate=32000 ! oggmux ! filesink location="%s"`, port, filePath)
 		cmd := exec.Command("sh", "-c", pipeline)
 		devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0644)
 		cmd.Stdout = devnull
@@ -191,6 +187,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 				return
 			}
 
+			// Close UDP connection
 			if rec.conn != nil {
 				rec.conn.Close()
 				rec.conn = nil
@@ -292,6 +289,18 @@ func (r *Room) StopRecording() error {
 			if rec.cmd != nil && rec.cmd.Process != nil {
 				if err := rec.cmd.Process.Signal(os.Interrupt); err != nil {
 					fmt.Printf("error stopping recorder: %v\n", err)
+				}
+				// Wait for process to exit with timeout
+				done := make(chan error, 1)
+				go func() {
+					done <- rec.cmd.Wait()
+				}()
+				select {
+				case <-done:
+					// Process exited normally
+				case <-time.After(5 * time.Second):
+					// Force kill if it doesn't exit gracefully
+					rec.cmd.Process.Kill()
 				}
 			}
 		}
