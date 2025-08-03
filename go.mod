@@ -19,6 +19,7 @@ require (
 	github.com/pion/ice/v4 v4.0.10
 	github.com/pion/turn/v4 v4.0.0
 	github.com/pion/webrtc/v4 v4.1.0
+	github.com/ziutek/gst v0.0.0-20210107120415-007422cec673
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/text v0.23.0
 )
@@ -40,6 +41,7 @@ require (
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	github.com/ziutek/glib v0.0.0-20141105171902-a43f7a959840 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 

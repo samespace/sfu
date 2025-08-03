@@ -11,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +19,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/ziutek/gst"
 )
 
 const (
@@ -51,8 +51,8 @@ type RecordingConfig struct {
 }
 
 type trackRecorder struct {
-	conn net.Conn
-	cmd  *exec.Cmd
+	conn     net.Conn
+	pipeline *gst.Pipeline
 }
 
 type recordingSession struct {
@@ -142,17 +142,18 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return fmt.Errorf("failed to allocate UDP port: %w", err)
 		}
 
-		// Build and start the GStreamer pipeline.
-		// Simple pipeline without timeouts - we'll control when it stops.
-		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
-  udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
-  rtpjitterbuffer do-lost=true ! rtpopusdepay ! filesink location="%s"`, port, filePath)
+		// Create the pipeline
+		pipelineStr := fmt.Sprintf(`
+		udpsrc port=%d caps=application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000 !
+		rtpjitterbuffer !
+		rtpopusdepay !
+		oggmux !
+		filesink location=%s
+	`, port, filePath)
 
-		cmd := exec.Command("bash", "-c", pipeline)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // allows killing the full process group
-
-		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("failed to start GStreamer pipeline: %w", err)
+		pipeline, err := gst.ParseLaunch(pipelineStr)
+		if err != nil || pipeline == nil {
+			return fmt.Errorf("failed to create pipeline: %w", err)
 		}
 
 		// Dial UDP connection to send RTP packets
@@ -161,7 +162,10 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return fmt.Errorf("failed to dial UDP: %w", err)
 		}
 
-		recorder := &trackRecorder{conn: conn, cmd: cmd}
+		// Set pipeline to PLAYING
+		pipeline.SetState(gst.STATE_PLAYING)
+
+		recorder := &trackRecorder{conn: conn, pipeline: pipeline}
 		session.writers[clientID][track.ID()] = recorder
 
 		// Forward RTP packets to the UDP connection
@@ -284,21 +288,14 @@ func (r *Room) StopRecording() error {
 				rec.conn.Close()
 			}
 
-			fmt.Println("stopping gst pipeline for track", rec.cmd.Process.Pid)
+			fmt.Println("stopping gst pipeline for track")
 
 			// Stop the pipeline process
-			if rec.cmd != nil && rec.cmd.Process != nil {
-				// Send SIGINT to the entire process group (flush and finalize)
-				err := syscall.Kill(-rec.cmd.Process.Pid, syscall.SIGINT)
-				if err != nil {
-					return fmt.Errorf("failed to send SIGINT: %w", err)
-				}
-
-				// Wait for pipeline to exit cleanly
-				return rec.cmd.Wait()
+			if rec.pipeline != nil {
+				rec.pipeline.SetState(gst.STATE_NULL)
 			}
 
-			fmt.Println("gst pipeline stopped for track", rec.cmd.Process.Pid)
+			fmt.Println("gst pipeline stopped for track")
 		}
 	}
 	session.mu.Unlock()
