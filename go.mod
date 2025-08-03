@@ -14,24 +14,22 @@ require (
 )
 
 require (
-	github.com/go-gst/go-gst v1.4.0
 	github.com/jaevor/go-nanoid v1.3.0
 	github.com/minio/minio-go/v7 v7.0.92
 	github.com/pion/ice/v4 v4.0.10
 	github.com/pion/turn/v4 v4.0.0
 	github.com/pion/webrtc/v4 v4.1.0
+	github.com/ziutek/gst v0.0.0-20210107120415-007422cec673
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0
 	golang.org/x/text v0.23.0
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-gst/go-glib v1.4.0 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/mattn/go-pointer v0.0.1 // indirect
 	github.com/minio/crc64nvme v1.0.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
@@ -43,6 +41,7 @@ require (
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	github.com/ziutek/glib v0.0.0-20141105171902-a43f7a959840 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 

@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-gst/go-gst/gst"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/ziutek/gst"
 )
 
 const (
@@ -67,12 +67,6 @@ type recordingSession struct {
 		StopTime  time.Time
 		Events    []Event
 	}
-}
-
-var once sync.Once
-
-func initializeGst() {
-	gst.Init(nil)
 }
 
 // StartRecording begins recording audio tracks in the room using GStreamer.
@@ -140,7 +134,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		if err := os.MkdirAll(trackDir, 0755); err != nil {
 			return err
 		}
-		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.ogg", track.ID()))
+		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.wav", track.ID()))
 
 		// Allocate a UDP port for this recorder
 		port, err := getFreeUDPPort()
@@ -148,16 +142,29 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return fmt.Errorf("failed to allocate UDP port: %w", err)
 		}
 
+		// 		gst-launch-1.0 -e \
+		//   udpsrc port=5004 caps="application/x-rtp, media=audio, encoding-name=OPUS, payload=111, clock-rate=48000" ! \
+		//   rtpjitterbuffer ! \
+		//   rtpopusdepay ! \
+		//   opusdec ! \
+		//   audioconvert ! \
+		//   audioresample ! \
+		//   wavenc ! \
+		//   filesink location=output.wav
+
 		// Create the pipeline
 		pipelineStr := fmt.Sprintf(`
 		udpsrc port=%d caps=application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000 !
 		rtpjitterbuffer !
 		rtpopusdepay !
-		oggmux !
+		opusdec !
+		audioconvert !
+		audioresample !
+		wavenc !
 		filesink location=%s
 	`, port, filePath)
 
-		pipeline, err := gst.NewPipelineFromString(pipelineStr)
+		pipeline, err := gst.ParseLaunch(pipelineStr)
 		if err != nil || pipeline == nil {
 			return fmt.Errorf("failed to create pipeline: %w", err)
 		}
@@ -169,7 +176,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		// Set pipeline to PLAYING
-		pipeline.SetState(gst.StatePlaying)
+		pipeline.SetState(gst.STATE_PLAYING)
 
 		recorder := &trackRecorder{conn: conn, pipeline: pipeline}
 		session.writers[clientID][track.ID()] = recorder
@@ -298,7 +305,7 @@ func (r *Room) StopRecording() error {
 
 			// Stop the pipeline process
 			if rec.pipeline != nil {
-				rec.pipeline.SetState(gst.StateNull)
+				rec.pipeline.SetState(gst.STATE_NULL)
 			}
 
 			fmt.Println("gst pipeline stopped for track")
@@ -321,11 +328,11 @@ func (r *Room) StopRecording() error {
 	}
 
 	// Merge channels and upload to S3 in background
-	go func() {
-		if err := r.mergeAndUpload(session); err != nil {
-			fmt.Printf("error merging and uploading: %v", err)
-		}
-	}()
+	// go func() {
+	// 	if err := r.mergeAndUpload(session); err != nil {
+	// 		fmt.Printf("error merging and uploading: %v", err)
+	// 	}
+	// }()
 
 	r.recordingMu.Lock()
 	r.recordingSession = nil
