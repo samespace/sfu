@@ -134,7 +134,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		if err := os.MkdirAll(trackDir, 0755); err != nil {
 			return err
 		}
-		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.wav", track.ID()))
+		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.ogg", track.ID()))
 
 		// Allocate a UDP port for this recorder
 		port, err := getFreeUDPPort()
