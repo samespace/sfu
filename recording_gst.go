@@ -320,11 +320,11 @@ func (r *Room) StopRecording() error {
 	}
 
 	// Merge channels and upload to S3 in background
-	// go func() {
-	// 	if err := r.mergeAndUpload(session); err != nil {
-	// 		fmt.Printf("error merging and uploading: %v", err)
-	// 	}
-	// }()
+	go func() {
+		if err := r.mergeAndUpload(session); err != nil {
+			fmt.Printf("error merging and uploading: %v", err)
+		}
+	}()
 
 	r.recordingMu.Lock()
 	r.recordingSession = nil
