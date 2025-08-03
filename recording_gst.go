@@ -13,13 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-gst/go-gst/gst"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"github.com/ziutek/gst"
 )
 
 const (
@@ -67,6 +67,12 @@ type recordingSession struct {
 		StopTime  time.Time
 		Events    []Event
 	}
+}
+
+var once sync.Once
+
+func initializeGst() {
+	gst.Init(nil)
 }
 
 // StartRecording begins recording audio tracks in the room using GStreamer.
@@ -151,7 +157,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		filesink location=%s
 	`, port, filePath)
 
-		pipeline, err := gst.ParseLaunch(pipelineStr)
+		pipeline, err := gst.NewPipelineFromString(pipelineStr)
 		if err != nil || pipeline == nil {
 			return fmt.Errorf("failed to create pipeline: %w", err)
 		}
@@ -163,7 +169,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		// Set pipeline to PLAYING
-		pipeline.SetState(gst.STATE_PLAYING)
+		pipeline.SetState(gst.StatePlaying)
 
 		recorder := &trackRecorder{conn: conn, pipeline: pipeline}
 		session.writers[clientID][track.ID()] = recorder
@@ -292,7 +298,7 @@ func (r *Room) StopRecording() error {
 
 			// Stop the pipeline process
 			if rec.pipeline != nil {
-				rec.pipeline.SetState(gst.STATE_NULL)
+				rec.pipeline.SetState(gst.StateNull)
 			}
 
 			fmt.Println("gst pipeline stopped for track")
