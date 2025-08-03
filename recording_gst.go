@@ -213,11 +213,10 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 				}(rec.cmd)
 			}
 
-			// Remove recorder from session map
-			delete(session.writers[clientID], track.ID())
-			if len(session.writers[clientID]) == 0 {
-				delete(session.writers, clientID)
-			}
+			// Intentionally keep recorder entry so StopRecording() can locate the
+			// generated file paths later when it calls mergeAndUpload. The object
+			// retains only lightweight pointers and is cleared after StopRecording
+			// completes.
 		})
 
 		return nil
