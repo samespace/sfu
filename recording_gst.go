@@ -163,7 +163,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// Dial UDP connection to send RTP packets
 		conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
 		if err != nil {
-			cmd.Process.Kill()
+			cmd.Process.Signal(os.Interrupt)
 			return fmt.Errorf("failed to dial UDP: %w", err)
 		}
 
@@ -192,13 +192,14 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 				return
 			}
 
-			if rec.conn != nil {
-				rec.conn.Close()
-			}
 			if rec.cmd != nil && rec.cmd.Process != nil {
 				// Attempt graceful shutdown
 				fmt.Println("stopping recorder for track", track.ID())
 				rec.cmd.Process.Signal(os.Interrupt)
+			}
+
+			if rec.conn != nil {
+				rec.conn.Close()
 			}
 
 			// Intentionally keep recorder entry so StopRecording() can locate the
@@ -294,13 +295,14 @@ func (r *Room) StopRecording() error {
 	session.mu.Lock()
 	for _, recorderMap := range session.writers {
 		for _, rec := range recorderMap {
-			if rec.conn != nil {
-				rec.conn.Close()
-			}
 			if rec.cmd != nil && rec.cmd.Process != nil {
 				fmt.Println("(stopRecording) stopping recorder for track", rec.cmd.Process.Pid)
 				// Attempt graceful shutdown
 				rec.cmd.Process.Signal(os.Interrupt)
+			}
+
+			if rec.conn != nil {
+				rec.conn.Close()
 			}
 		}
 	}
