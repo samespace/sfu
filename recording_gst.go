@@ -134,7 +134,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		if err := os.MkdirAll(trackDir, 0755); err != nil {
 			return err
 		}
-		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.ogg", track.ID()))
+		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.opus", track.ID()))
 
 		// Allocate a UDP port for this recorder
 		port, err := getFreeUDPPort()
@@ -146,8 +146,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// Simple pipeline without timeouts - we'll control when it stops.
 		pipeline := fmt.Sprintf(`gst-launch-1.0 -e -q \
   udpsrc port=%d caps="application/x-rtp,media=audio,encoding-name=OPUS,payload=111,clock-rate=48000" ! \
-  rtpjitterbuffer do-lost=true ! rtpopusdepay ! opusdec ! audioconvert ! audioresample ! \
-  opusenc bitrate=32000 ! oggmux ! filesink location="%s"`, port, filePath)
+  rtpjitterbuffer do-lost=true ! rtpopusdepay ! filesink location="%s"`, port, filePath)
 
 		cmd := exec.Command("bash", "-c", pipeline)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // allows killing the full process group
@@ -323,11 +322,11 @@ func (r *Room) StopRecording() error {
 	r.recordingMu.Unlock()
 
 	// Merge channels and upload to S3 in background
-	go func() {
-		if err := r.mergeAndUpload(session); err != nil {
-			fmt.Printf("error merging and uploading: %v", err)
-		}
-	}()
+	// go func() {
+	// 	if err := r.mergeAndUpload(session); err != nil {
+	// 		fmt.Printf("error merging and uploading: %v", err)
+	// 	}
+	// }()
 
 	return nil
 }
