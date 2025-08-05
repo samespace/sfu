@@ -67,15 +67,13 @@ type trackWriter struct {
 	audioWriter *oggwriter.OggWriter
 	mixer       *OpusMixer
 	clockRate   uint32
-	done        chan struct{} // signals when writeRTP is done
 
 	mu sync.Mutex
 }
 
 func (tw *trackWriter) writeRTP() {
-	defer close(tw.done) // signal completion when function exits
-	for packet := range tw.mixer.GetOutputChan() {
-		tw.audioWriter.WriteRTP(packet)
+	for pkt := range tw.mixer.Out() {
+		tw.audioWriter.WriteRTP(pkt)
 	}
 	fmt.Println("closing mixer for client", tw.mixer.ssrc)
 }
@@ -153,14 +151,11 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		// Use type switch to handle both Track and AudioTrack types
 		var codecParams webrtc.RTPCodecParameters
-		var ssrc uint32
 		switch t := track.(type) {
 		case *Track:
 			codecParams = t.base.codec
-			ssrc = uint32(t.SSRC())
 		case *AudioTrack:
 			codecParams = t.Track.base.codec
-			ssrc = uint32(t.Track.SSRC())
 		default:
 			r.sfu.log.Warnf("room: unknown track type: %T", track)
 			return nil
@@ -175,19 +170,17 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return err
 		}
 
-		mixer := NewOpusMixer(ssrc, uint8(codecParams.PayloadType))
+		mixer := NewOpusMixer(1000)
 
 		// Create trackWriter
 		tw := &trackWriter{
 			audioWriter: ow,
 			clockRate:   sampleRate,
 			mixer:       mixer,
-			done:        make(chan struct{}),
 			mu:          sync.Mutex{},
 		}
 
 		go tw.writeRTP()
-		mixer.Start()
 
 		session.writers[clientID][track.ID()] = tw
 
@@ -195,7 +188,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			if session.paused || session.stopped {
 				return
 			}
-			tw.mixer.AddWebRTCPacket(pkt)
+			tw.mixer.Push(pkt)
 		})
 
 		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())
@@ -295,20 +288,12 @@ func (r *Room) StopRecording() error {
 	fmt.Printf("closing writers: %s", session.id)
 
 	// Close writers and collect done channels
-	var doneChannels []<-chan struct{}
 	for _, m := range session.writers {
 		for _, tw := range m {
 			tw.mu.Lock()
-			tw.mixer.Stop() // This closes the output channel, causing writeRTP to exit
-			doneChannels = append(doneChannels, tw.done)
+			tw.mixer.Close()
 			tw.mu.Unlock()
 		}
-	}
-
-	// Wait for all writeRTP goroutines to finish
-	fmt.Printf("waiting for %d writers to finish: %s", len(doneChannels), session.id)
-	for _, done := range doneChannels {
-		<-done
 	}
 
 	// Now it's safe to close the audio writers
