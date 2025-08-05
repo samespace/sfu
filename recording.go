@@ -75,7 +75,7 @@ func (tw *trackWriter) writeRTP() {
 	for packet := range tw.mixer.GetOutputChan() {
 		tw.audioWriter.WriteRTP(packet)
 	}
-	fmt.Printf("closing mixer for client %s, track %s", tw.mixer.ssrc, tw.mixer.payloadType)
+	fmt.Println("closing mixer for client", tw.mixer.ssrc)
 }
 
 // StartRecording begins recording audio tracks in the room according to the provided config.
@@ -192,7 +192,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			if session.paused || session.stopped {
 				return
 			}
-			tw.audioWriter.WriteRTP(pkt)
+			tw.mixer.AddWebRTCPacket(pkt)
 		})
 
 		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())

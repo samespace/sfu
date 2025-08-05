@@ -189,7 +189,6 @@ func (om *OpusMixer) handleSilentPacket(packet *rtp.Packet) {
 	if timeSinceLastPacket > om.maxSilentDuration {
 		select {
 		case om.outputChan <- packet:
-			log.Println("Sending DTX packet")
 		case <-om.ctx.Done():
 			return
 		default:
