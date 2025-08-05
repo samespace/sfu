@@ -67,11 +67,13 @@ type trackWriter struct {
 	audioWriter *oggwriter.OggWriter
 	mixer       *OpusMixer
 	clockRate   uint32
+	done        chan struct{} // signals when writeRTP is done
 
 	mu sync.Mutex
 }
 
 func (tw *trackWriter) writeRTP() {
+	defer close(tw.done) // signal completion when function exits
 	for packet := range tw.mixer.GetOutputChan() {
 		tw.audioWriter.WriteRTP(packet)
 	}
@@ -180,6 +182,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			audioWriter: ow,
 			clockRate:   sampleRate,
 			mixer:       mixer,
+			done:        make(chan struct{}),
 			mu:          sync.Mutex{},
 		}
 
@@ -291,14 +294,28 @@ func (r *Room) StopRecording() error {
 
 	fmt.Printf("closing writers: %s", session.id)
 
-	// Close writers
+	// Close writers and collect done channels
+	var doneChannels []<-chan struct{}
 	for _, m := range session.writers {
 		for _, tw := range m {
 			tw.mu.Lock()
+			tw.mixer.Stop() // This closes the output channel, causing writeRTP to exit
+			doneChannels = append(doneChannels, tw.done)
+			tw.mu.Unlock()
+		}
+	}
 
-			tw.mixer.Stop()
+	// Wait for all writeRTP goroutines to finish
+	fmt.Printf("waiting for %d writers to finish: %s", len(doneChannels), session.id)
+	for _, done := range doneChannels {
+		<-done
+	}
+
+	// Now it's safe to close the audio writers
+	for _, m := range session.writers {
+		for _, tw := range m {
+			tw.mu.Lock()
 			tw.audioWriter.Close()
-
 			tw.mu.Unlock()
 		}
 	}
@@ -437,6 +454,27 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	finalPath := filepath.Join(baseDir, session.id+".ogg")
 	left, hasLeft := monoFiles[ChannelOne]
 	right, hasRight := monoFiles[ChannelTwo]
+
+	// Validate files before merging
+	if hasLeft {
+		if stat, err := os.Stat(left); err != nil {
+			logError("Left channel file is missing: %s (err: %v)", left, err)
+			hasLeft = false
+		} else if stat.Size() == 0 {
+			logError("Left channel file is empty: %s (size: %d)", left, stat.Size())
+			hasLeft = false
+		}
+	}
+	if hasRight {
+		if stat, err := os.Stat(right); err != nil {
+			logError("Right channel file is missing: %s (err: %v)", right, err)
+			hasRight = false
+		} else if stat.Size() == 0 {
+			logError("Right channel file is empty: %s (size: %d)", right, stat.Size())
+			hasRight = false
+		}
+	}
+
 	if hasLeft && hasRight {
 		args := []string{"-y", "-i", left, "-i", right, "-filter_complex", "amerge=inputs=2", "-ac", "2", finalPath}
 		if err := runCmdWithRetry("ffmpeg", args...); err != nil {

@@ -189,6 +189,9 @@ func (om *OpusMixer) handleSilentPacket(packet *rtp.Packet) {
 	if timeSinceLastPacket > om.maxSilentDuration {
 		select {
 		case om.outputChan <- packet:
+			// Update lastPacketTime when we successfully send a silent packet
+			// This prevents infinite generation of silent packets
+			om.lastPacketTime = time.Now()
 		case <-om.ctx.Done():
 			return
 		default:
