@@ -64,8 +64,11 @@ type recordingSession struct {
 }
 
 type trackWriter struct {
-	audioWriter *oggwriter.OggWriter
-	clockRate   uint32
+	sequenceNumber uint16
+	timestamp      uint32
+	ssrc           uint32
+	audioWriter    *oggwriter.OggWriter
+	clockRate      uint32
 
 	mu sync.Mutex
 }
@@ -172,6 +175,13 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		session.writers[clientID][track.ID()] = tw
 
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
+			tw.mu.Lock()
+			defer tw.mu.Unlock()
+
+			tw.sequenceNumber = pkt.SequenceNumber
+			tw.timestamp = pkt.Timestamp
+			tw.ssrc = pkt.SSRC
+
 			if session.paused || session.stopped {
 				// add the silence packet here
 				pkt.Payload = []byte{0xF8, 0xFF, 0xFE}
@@ -278,7 +288,23 @@ func (r *Room) StopRecording() error {
 	// Close writers
 	for _, m := range session.writers {
 		for _, tw := range m {
+			tw.mu.Lock()
+
+			// before closing write one silent packet
+			tw.audioWriter.WriteRTP(&rtp.Packet{
+				Header: rtp.Header{
+					Version:        2,
+					PayloadType:    111,
+					Marker:         true,
+					SequenceNumber: tw.sequenceNumber + 1,
+					Timestamp:      tw.timestamp + 960,
+					SSRC:           tw.ssrc,
+				},
+				Payload: []byte{0xF8, 0xFF, 0xFE},
+			})
 			tw.audioWriter.Close()
+
+			tw.mu.Unlock()
 		}
 	}
 
