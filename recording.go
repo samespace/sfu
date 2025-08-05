@@ -64,13 +64,18 @@ type recordingSession struct {
 }
 
 type trackWriter struct {
-	sequenceNumber uint16
-	timestamp      uint32
-	ssrc           uint32
-	audioWriter    *oggwriter.OggWriter
-	clockRate      uint32
+	audioWriter *oggwriter.OggWriter
+	mixer       *OpusMixer
+	clockRate   uint32
 
 	mu sync.Mutex
+}
+
+func (tw *trackWriter) writeRTP() {
+	for packet := range tw.mixer.GetOutputChan() {
+		tw.audioWriter.WriteRTP(packet)
+	}
+	fmt.Printf("closing mixer for client %s, track %s", tw.mixer.ssrc, tw.mixer.payloadType)
 }
 
 // StartRecording begins recording audio tracks in the room according to the provided config.
@@ -116,7 +121,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 	// Helper to add a track writer for a given client and track
 	addWriter := func(clientID string, track ITrack) error {
-
 		session.mu.Lock()
 		defer session.mu.Unlock()
 		channel := cfg.ChannelMapping[clientID]
@@ -147,11 +151,14 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		// Use type switch to handle both Track and AudioTrack types
 		var codecParams webrtc.RTPCodecParameters
+		var ssrc uint32
 		switch t := track.(type) {
 		case *Track:
 			codecParams = t.base.codec
+			ssrc = uint32(t.SSRC())
 		case *AudioTrack:
 			codecParams = t.Track.base.codec
+			ssrc = uint32(t.Track.SSRC())
 		default:
 			r.sfu.log.Warnf("room: unknown track type: %T", track)
 			return nil
@@ -166,25 +173,24 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return err
 		}
 
+		mixer := NewOpusMixer(ssrc, uint8(codecParams.PayloadType))
+
 		// Create trackWriter
 		tw := &trackWriter{
 			audioWriter: ow,
 			clockRate:   sampleRate,
+			mixer:       mixer,
+			mu:          sync.Mutex{},
 		}
+
+		go tw.writeRTP()
+		mixer.Start()
 
 		session.writers[clientID][track.ID()] = tw
 
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
-			tw.mu.Lock()
-			defer tw.mu.Unlock()
-
-			tw.sequenceNumber = pkt.SequenceNumber
-			tw.timestamp = pkt.Timestamp
-			tw.ssrc = pkt.SSRC
-
 			if session.paused || session.stopped {
-				// add the silence packet here
-				pkt.Payload = []byte{0xF8, 0xFF, 0xFE}
+				return
 			}
 			tw.audioWriter.WriteRTP(pkt)
 		})
@@ -290,18 +296,7 @@ func (r *Room) StopRecording() error {
 		for _, tw := range m {
 			tw.mu.Lock()
 
-			// before closing write one silent packet
-			tw.audioWriter.WriteRTP(&rtp.Packet{
-				Header: rtp.Header{
-					Version:        2,
-					PayloadType:    111,
-					Marker:         true,
-					SequenceNumber: tw.sequenceNumber + 1,
-					Timestamp:      tw.timestamp + 960,
-					SSRC:           tw.ssrc,
-				},
-				Payload: []byte{0xF8, 0xFF, 0xFE},
-			})
+			tw.mixer.Stop()
 			tw.audioWriter.Close()
 
 			tw.mu.Unlock()
