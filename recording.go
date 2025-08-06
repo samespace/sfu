@@ -64,18 +64,13 @@ type recordingSession struct {
 }
 
 type trackWriter struct {
-	audioWriter *oggwriter.OggWriter
-	mixer       *OpusMixer
-	clockRate   uint32
+	sequenceNumber uint16
+	timestamp      uint32
+	ssrc           uint32
+	audioWriter    *oggwriter.OggWriter
+	clockRate      uint32
 
 	mu sync.Mutex
-}
-
-func (tw *trackWriter) writeRTP() {
-	for pkt := range tw.mixer.Out() {
-		tw.audioWriter.WriteRTP(pkt)
-	}
-	fmt.Println("closing mixer for client", tw.mixer.ssrc)
 }
 
 // StartRecording begins recording audio tracks in the room according to the provided config.
@@ -121,6 +116,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 	// Helper to add a track writer for a given client and track
 	addWriter := func(clientID string, track ITrack) error {
+
 		session.mu.Lock()
 		defer session.mu.Unlock()
 		channel := cfg.ChannelMapping[clientID]
@@ -170,25 +166,27 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return err
 		}
 
-		mixer := NewOpusMixer(1000)
-
 		// Create trackWriter
 		tw := &trackWriter{
 			audioWriter: ow,
 			clockRate:   sampleRate,
-			mixer:       mixer,
-			mu:          sync.Mutex{},
 		}
-
-		go tw.writeRTP()
 
 		session.writers[clientID][track.ID()] = tw
 
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
+			tw.mu.Lock()
+			defer tw.mu.Unlock()
+
+			tw.sequenceNumber = pkt.SequenceNumber
+			tw.timestamp = pkt.Timestamp
+			tw.ssrc = pkt.SSRC
+
 			if session.paused || session.stopped {
-				return
+				// add the silence packet here
+				pkt.Payload = []byte{0xF8, 0xFF, 0xFE}
 			}
-			tw.mixer.Push(pkt)
+			tw.audioWriter.WriteRTP(pkt)
 		})
 
 		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())
@@ -287,20 +285,25 @@ func (r *Room) StopRecording() error {
 
 	fmt.Printf("closing writers: %s", session.id)
 
-	// Close writers and collect done channels
+	// Close writers
 	for _, m := range session.writers {
 		for _, tw := range m {
 			tw.mu.Lock()
-			tw.mixer.Close()
-			tw.mu.Unlock()
-		}
-	}
 
-	// Now it's safe to close the audio writers
-	for _, m := range session.writers {
-		for _, tw := range m {
-			tw.mu.Lock()
+			// before closing write one silent packet
+			tw.audioWriter.WriteRTP(&rtp.Packet{
+				Header: rtp.Header{
+					Version:        2,
+					PayloadType:    111,
+					Marker:         true,
+					SequenceNumber: tw.sequenceNumber + 1,
+					Timestamp:      tw.timestamp + 960,
+					SSRC:           tw.ssrc,
+				},
+				Payload: []byte{0xF8, 0xFF, 0xFE},
+			})
 			tw.audioWriter.Close()
+
 			tw.mu.Unlock()
 		}
 	}
@@ -439,27 +442,6 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	finalPath := filepath.Join(baseDir, session.id+".ogg")
 	left, hasLeft := monoFiles[ChannelOne]
 	right, hasRight := monoFiles[ChannelTwo]
-
-	// Validate files before merging
-	if hasLeft {
-		if stat, err := os.Stat(left); err != nil {
-			logError("Left channel file is missing: %s (err: %v)", left, err)
-			hasLeft = false
-		} else if stat.Size() == 0 {
-			logError("Left channel file is empty: %s (size: %d)", left, stat.Size())
-			hasLeft = false
-		}
-	}
-	if hasRight {
-		if stat, err := os.Stat(right); err != nil {
-			logError("Right channel file is missing: %s (err: %v)", right, err)
-			hasRight = false
-		} else if stat.Size() == 0 {
-			logError("Right channel file is empty: %s (size: %d)", right, stat.Size())
-			hasRight = false
-		}
-	}
-
 	if hasLeft && hasRight {
 		args := []string{"-y", "-i", left, "-i", right, "-filter_complex", "amerge=inputs=2", "-ac", "2", finalPath}
 		if err := runCmdWithRetry("ffmpeg", args...); err != nil {
