@@ -486,56 +486,40 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		args = append(args, "-itsoffset", "0", "-i", in)
 	}
 
-	// Construct filter graph
+	// Construct filter graph with per-branch resample to pad gaps from timestamps.
 	var filter string
-	nextIndex := 0
-	var leftOut, rightOut string
-	if len(leftInputs) >= 1 {
-		// Build amix for left
-		if len(leftInputs) == 1 {
-			leftOut = fmt.Sprintf("[%d:a]", nextIndex)
-			nextIndex += 1
+	nL := len(leftInputs)
+	nR := len(rightInputs)
+	// Left branch
+	if nL >= 1 {
+		if nL == 1 {
+			filter += "[0:a]aresample=async=1:first_pts=0[aL];"
 		} else {
-			for i := 0; i < len(leftInputs); i++ {
-				filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+			for i := 0; i < nL; i++ {
+				filter += fmt.Sprintf("[%d:a]", i)
 			}
-			filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[L];", len(leftInputs))
-			leftOut = "[L]"
-			nextIndex += len(leftInputs)
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Lm];[Lm]aresample=async=1:first_pts=0[aL];", nL)
 		}
 	}
-
-	if len(rightInputs) >= 1 {
-		if len(rightInputs) == 1 {
-			rightOut = fmt.Sprintf("[%d:a]", nextIndex)
-			nextIndex += 1
+	// Right branch
+	if nR >= 1 {
+		base := nL
+		if nR == 1 {
+			filter += fmt.Sprintf("[%d:a]aresample=async=1:first_pts=0[aR];", base)
 		} else {
-			for i := 0; i < len(rightInputs); i++ {
-				filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+			for i := 0; i < nR; i++ {
+				filter += fmt.Sprintf("[%d:a]", base+i)
 			}
-			filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[R];", len(rightInputs))
-			rightOut = "[R]"
-			nextIndex += len(rightInputs)
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Rm];[Rm]aresample=async=1:first_pts=0[aR];", nR)
 		}
 	}
-
-	if leftOut != "" && rightOut != "" {
-		filter += fmt.Sprintf("%s%samerge=inputs=2,aresample=async=1[aout]", leftOut, rightOut)
+	if nL >= 1 && nR >= 1 {
+		filter += "[aL][aR]amerge=inputs=2[aout]"
 		args = append(args, "-filter_complex", filter, "-map", "[aout]", "-c:a", "aac", "-ac", "2", "-b:a", "32k", m4aPath)
-	} else {
-		// Only one side present
-		if len(leftInputs) > 1 || len(rightInputs) > 1 {
-			// We have an amix in filter already, map its output
-			mono := "[L]"
-			if leftOut == "" {
-				mono = "[R]"
-			}
-			// Map the amix output directly (already aresample'd)
-			args = append(args, "-filter_complex", filter, "-map", mono, "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
-		} else {
-			// Single input, no filter needed; map 0:a
-			args = append(args, "-map", "0:a", "-af", "aresample=async=1", "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
-		}
+	} else if nL >= 1 {
+		args = append(args, "-filter_complex", filter, "-map", "[aL]", "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
+	} else if nR >= 1 {
+		args = append(args, "-filter_complex", filter, "-map", "[aR]", "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
 	}
 
 	logError("ffmpeg args: %v", args)
