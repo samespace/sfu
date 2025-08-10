@@ -342,6 +342,27 @@ func (r *Room) StopRecording() error {
 	session.stopped = true
 	session.mu.Unlock()
 
+	// Ensure duration covers StopTime by appending a final silent Opus frame per track
+	for _, writerMap := range session.writers {
+		for _, tw := range writerMap {
+			tw.mu.Lock()
+			targetPts := session.meta.StopTime.Sub(tw.recordingStartTime).Milliseconds()
+			if targetPts > tw.lastPTS {
+				silence := []byte{0xF8, 0xFF, 0xFE}
+				pts := targetPts
+				if pts <= tw.lastPTS {
+					pts = tw.lastPTS + 1
+				}
+				if _, err := tw.writer.Write(true, pts, silence); err != nil {
+					fmt.Printf("error writing final silence: %v", err)
+				} else {
+					tw.lastPTS = pts
+				}
+			}
+			tw.mu.Unlock()
+		}
+	}
+
 	fmt.Printf("closing writers: %s", session.id)
 
 	// Close writers
