@@ -469,6 +469,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 
 	leftInputs := filesByChannel[ChannelOne]
 	rightInputs := filesByChannel[ChannelTwo]
+	logError("merge: leftInputs=%d rightInputs=%d", len(leftInputs), len(rightInputs))
 	if len(leftInputs) == 0 && len(rightInputs) == 0 {
 		err := fmt.Errorf("no audio to merge")
 		logError(err.Error())
@@ -489,29 +490,33 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	var filter string
 	nextIndex := 0
 	var leftOut, rightOut string
-	if len(leftInputs) > 1 {
+	if len(leftInputs) >= 1 {
 		// Build amix for left
-		for i := 0; i < len(leftInputs); i++ {
-			filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+		if len(leftInputs) == 1 {
+			leftOut = fmt.Sprintf("[%d:a]", nextIndex)
+			nextIndex += 1
+		} else {
+			for i := 0; i < len(leftInputs); i++ {
+				filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+			}
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[L];", len(leftInputs))
+			leftOut = "[L]"
+			nextIndex += len(leftInputs)
 		}
-		filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[L];", len(leftInputs))
-		leftOut = "[L]"
-		nextIndex += len(leftInputs)
-	} else if len(leftInputs) == 1 {
-		leftOut = fmt.Sprintf("[%d:a]", nextIndex)
-		nextIndex += 1
 	}
 
-	if len(rightInputs) > 1 {
-		for i := 0; i < len(rightInputs); i++ {
-			filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+	if len(rightInputs) >= 1 {
+		if len(rightInputs) == 1 {
+			rightOut = fmt.Sprintf("[%d:a]", nextIndex)
+			nextIndex += 1
+		} else {
+			for i := 0; i < len(rightInputs); i++ {
+				filter += fmt.Sprintf("[%d:a]", nextIndex+i)
+			}
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[R];", len(rightInputs))
+			rightOut = "[R]"
+			nextIndex += len(rightInputs)
 		}
-		filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[R];", len(rightInputs))
-		rightOut = "[R]"
-		nextIndex += len(rightInputs)
-	} else if len(rightInputs) == 1 {
-		rightOut = fmt.Sprintf("[%d:a]", nextIndex)
-		nextIndex += 1
 	}
 
 	if leftOut != "" && rightOut != "" {
@@ -533,6 +538,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		}
 	}
 
+	logError("ffmpeg args: %v", args)
 	if err := runCmdWithRetry("ffmpeg", args...); err != nil {
 		err = fmt.Errorf("ffmpeg single-pass mix+encode failed: %w", err)
 		logError(err.Error())
