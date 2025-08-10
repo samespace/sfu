@@ -486,35 +486,35 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		args = append(args, "-itsoffset", "0", "-i", in)
 	}
 
-	// Construct filter graph with per-branch resample to pad gaps from timestamps.
+	// Construct filter graph with per-branch resample and explicit mono layouts to satisfy amerge.
 	var filter string
 	nL := len(leftInputs)
 	nR := len(rightInputs)
 	// Left branch
 	if nL >= 1 {
 		if nL == 1 {
-			filter += "[0:a]aresample=async=1:first_pts=0[aL];"
+			filter += "[0:a]aresample=async=1:first_pts=0,aformat=channel_layouts=mono[aL];"
 		} else {
 			for i := 0; i < nL; i++ {
 				filter += fmt.Sprintf("[%d:a]", i)
 			}
-			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Lm];[Lm]aresample=async=1:first_pts=0[aL];", nL)
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Lm];[Lm]aresample=async=1:first_pts=0,aformat=channel_layouts=mono[aL];", nL)
 		}
 	}
 	// Right branch
 	if nR >= 1 {
 		base := nL
 		if nR == 1 {
-			filter += fmt.Sprintf("[%d:a]aresample=async=1:first_pts=0[aR];", base)
+			filter += fmt.Sprintf("[%d:a]aresample=async=1:first_pts=0,aformat=channel_layouts=mono[aR];", base)
 		} else {
 			for i := 0; i < nR; i++ {
 				filter += fmt.Sprintf("[%d:a]", base+i)
 			}
-			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Rm];[Rm]aresample=async=1:first_pts=0[aR];", nR)
+			filter += fmt.Sprintf("amix=inputs=%d:duration=longest[Rm];[Rm]aresample=async=1:first_pts=0,aformat=channel_layouts=mono[aR];", nR)
 		}
 	}
 	if nL >= 1 && nR >= 1 {
-		filter += "[aL][aR]amerge=inputs=2[aout]"
+		filter += "[aL][aR]amerge=inputs=2,aformat=channel_layouts=stereo[aout]"
 		args = append(args, "-filter_complex", filter, "-map", "[aout]", "-c:a", "aac", "-ac", "2", "-b:a", "32k", m4aPath)
 	} else if nL >= 1 {
 		args = append(args, "-filter_complex", filter, "-map", "[aL]", "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
