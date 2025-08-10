@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/at-wat/ebml-go v0.17.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-ini/ini v1.67.0 // indirect
 	github.com/goccy/go-json v0.10.5 // indirect
