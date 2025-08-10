@@ -215,6 +215,15 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		session.writers[clientID][track.ID()] = tw
 
+		// Anchor stream at t=0 with an Opus DTX frame so leading silence is preserved
+		tw.mu.Lock()
+		if tw.lastPTS < 0 {
+			if _, err := tw.writer.Write(true, 0, []byte{0xF8, 0xFF, 0xFE}); err == nil {
+				tw.lastPTS = 0
+			}
+		}
+		tw.mu.Unlock()
+
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
 			if session.paused || session.stopped {
 				return
@@ -468,12 +477,12 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 
 	m4aPath := filepath.Join(baseDir, session.id+".m4a")
 	args := []string{"-y", "-copyts", "-start_at_zero"}
-	// Add inputs: left first, then right
+	// Add inputs: left first, then right. Mark primary audio stream and ensure stereo layout on output.
 	for _, in := range leftInputs {
-		args = append(args, "-i", in)
+		args = append(args, "-itsoffset", "0", "-i", in)
 	}
 	for _, in := range rightInputs {
-		args = append(args, "-i", in)
+		args = append(args, "-itsoffset", "0", "-i", in)
 	}
 
 	// Construct filter graph
@@ -507,7 +516,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 
 	if leftOut != "" && rightOut != "" {
 		filter += fmt.Sprintf("%s%samerge=inputs=2,aresample=async=1[aout]", leftOut, rightOut)
-		args = append(args, "-filter_complex", filter, "-map", "[aout]", "-c:a", "aac", "-b:a", "32k", m4aPath)
+		args = append(args, "-filter_complex", filter, "-map", "[aout]", "-c:a", "aac", "-ac", "2", "-b:a", "32k", m4aPath)
 	} else {
 		// Only one side present
 		if len(leftInputs) > 1 || len(rightInputs) > 1 {
@@ -517,10 +526,10 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 				mono = "[R]"
 			}
 			// Map the amix output directly (already aresample'd)
-			args = append(args, "-filter_complex", filter, "-map", mono, "-c:a", "aac", "-b:a", "32k", m4aPath)
+			args = append(args, "-filter_complex", filter, "-map", mono, "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
 		} else {
 			// Single input, no filter needed; map 0:a
-			args = append(args, "-map", "0:a", "-af", "aresample=async=1", "-c:a", "aac", "-b:a", "32k", m4aPath)
+			args = append(args, "-map", "0:a", "-af", "aresample=async=1", "-c:a", "aac", "-ac", "1", "-b:a", "32k", m4aPath)
 		}
 	}
 
