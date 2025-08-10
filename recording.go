@@ -66,9 +66,13 @@ type recordingSession struct {
 // bufferedPacket removed: we now write directly from OnRead
 
 type trackWriter struct {
-	writer  mkvcore.BlockWriteCloser
-	lastPTS int64
-	mu      sync.Mutex
+	writer    mkvcore.BlockWriteCloser
+	lastPTS   int64
+	mu        sync.Mutex
+	clockRate uint32
+	rtpBase   uint32
+	ptsBaseMs int64
+	rtpInited bool
 
 	// Buffering fields
 	recordingStartTime time.Time
@@ -205,6 +209,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		tw := &trackWriter{
 			writer:             writers[0],
 			lastPTS:            -1,
+			clockRate:          sampleRate,
 			recordingStartTime: session.meta.StartTime,
 		}
 
@@ -219,7 +224,19 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			cloned := pkt.Clone()
 			arrival := time.Now()
 			tw.mu.Lock()
-			pts := arrival.Sub(tw.recordingStartTime).Milliseconds()
+			// Compute PTS from both wall-clock and RTP timestamp; pick the larger to avoid compression
+			ptsWall := arrival.Sub(tw.recordingStartTime).Milliseconds()
+			if !tw.rtpInited {
+				tw.rtpBase = cloned.Timestamp
+				tw.ptsBaseMs = ptsWall
+				tw.rtpInited = true
+			}
+			rtpDelta := uint32(cloned.Timestamp - tw.rtpBase)
+			ptsRtp := tw.ptsBaseMs + int64(rtpDelta)*1000/int64(tw.clockRate)
+			pts := ptsWall
+			if ptsRtp > pts {
+				pts = ptsRtp
+			}
 			if pts <= tw.lastPTS {
 				pts = tw.lastPTS + 1
 			}
@@ -429,7 +446,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	}
 
 	m4aPath := filepath.Join(baseDir, session.id+".m4a")
-	args := []string{"-y"}
+	args := []string{"-y", "-copyts", "-start_at_zero"}
 	// Add inputs: left first, then right
 	for _, in := range leftInputs {
 		args = append(args, "-i", in)
@@ -447,7 +464,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		for i := 0; i < len(leftInputs); i++ {
 			filter += fmt.Sprintf("[%d:a]", nextIndex+i)
 		}
-		filter += fmt.Sprintf("amix=inputs=%d:duration=longest[L];", len(leftInputs))
+		filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[L];", len(leftInputs))
 		leftOut = "[L]"
 		nextIndex += len(leftInputs)
 	} else if len(leftInputs) == 1 {
@@ -459,7 +476,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		for i := 0; i < len(rightInputs); i++ {
 			filter += fmt.Sprintf("[%d:a]", nextIndex+i)
 		}
-		filter += fmt.Sprintf("amix=inputs=%d:duration=longest[R];", len(rightInputs))
+		filter += fmt.Sprintf("amix=inputs=%d:duration=longest,aresample=async=1[R];", len(rightInputs))
 		rightOut = "[R]"
 		nextIndex += len(rightInputs)
 	} else if len(rightInputs) == 1 {
@@ -468,7 +485,7 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	}
 
 	if leftOut != "" && rightOut != "" {
-		filter += fmt.Sprintf("%s%samerge=inputs=2[aout]", leftOut, rightOut)
+		filter += fmt.Sprintf("%s%samerge=inputs=2,aresample=async=1[aout]", leftOut, rightOut)
 		args = append(args, "-filter_complex", filter, "-map", "[aout]", "-c:a", "aac", "-b:a", "32k", m4aPath)
 	} else {
 		// Only one side present
@@ -478,11 +495,11 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 			if leftOut == "" {
 				mono = "[R]"
 			}
-			// Map the amix output directly
+			// Map the amix output directly (already aresample'd)
 			args = append(args, "-filter_complex", filter, "-map", mono, "-c:a", "aac", "-b:a", "32k", m4aPath)
 		} else {
 			// Single input, no filter needed; map 0:a
-			args = append(args, "-map", "0:a", "-c:a", "aac", "-b:a", "32k", m4aPath)
+			args = append(args, "-map", "0:a", "-af", "aresample=async=1", "-c:a", "aac", "-b:a", "32k", m4aPath)
 		}
 	}
 
