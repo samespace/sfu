@@ -21,7 +21,6 @@ require (
 	github.com/pion/webrtc/v4 v4.1.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/text v0.23.0
-	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
 
 require (
