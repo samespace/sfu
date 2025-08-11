@@ -4,23 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"math/rand/v2"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
+
+	// "reflect"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/pion/interceptor"
-	"github.com/pion/rtp"
+
+	// "github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
 )
 
 const (
@@ -55,7 +52,8 @@ type RecordingConfig struct {
 type recordingSession struct {
 	id      string
 	cfg     RecordingConfig
-	writers map[string]map[string]*trackWriter // clientID -> trackID -> writer
+	mixer   *Mixer
+	tps     map[string]map[string]*TrackProcessor // clientID -> trackID -> processor
 	mu      sync.Mutex
 	paused  bool
 	stopped bool
@@ -67,28 +65,9 @@ type recordingSession struct {
 }
 
 // bufferedPacket holds an RTP packet along with its arrival time
-type bufferedPacket struct {
-	packet      *rtp.Packet
-	arrivalTime time.Time
-}
+// legacy buffered recording types removed in favor of mixer-based recording
 
-type trackWriter struct {
-	writer           *oggwriter.OggWriter
-	lastRTPTimestamp uint32
-	lastSeqNum       uint16
-	clockRate        uint32
-	lastPacketTime   time.Time
-	mu               sync.Mutex
-
-	// Buffering fields
-	packetBuffer       chan bufferedPacket
-	stopChan           chan struct{}
-	wg                 sync.WaitGroup
-	ssrc               uint32
-	recordingStartTime time.Time
-}
-
-// StartRecording begins recording audio tracks in the room according to the provided config.
+// StartRecording begins recording audio tracks using the SR-aligned mixer according to the provided config.
 func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	r.recordingMu.Lock()
 	defer r.recordingMu.Unlock()
@@ -98,9 +77,9 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	startTime := time.Now()
 	id := fmt.Sprintf("%d_%s", startTime.Unix(), uuid.New().String())
 	session := &recordingSession{
-		id:      id,
-		cfg:     cfg,
-		writers: make(map[string]map[string]*trackWriter),
+		id:  id,
+		cfg: cfg,
+		tps: make(map[string]map[string]*TrackProcessor),
 	}
 	session.meta.StartTime = startTime
 
@@ -129,8 +108,24 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		session.mu.Unlock()
 	})
 
-	// Helper to add a track writer for a given client and track
-	addWriter := func(clientID string, track ITrack) error {
+	// Create mixed output path now
+	finalDir := filepath.Join(cfg.BasePath, id)
+	mixedPath := filepath.Join(finalDir, id+".m4a")
+
+	// Create mixer (writes raw to a temp aac/m4a file directly)
+	mx, err := NewMixer(mixedPath, DefaultBatchMS, DefaultSafetyMS, DefaultBufferSec)
+	if err != nil {
+		return "", err
+	}
+	session.mixer = mx
+
+	// Attach SR readers for current peer connections (all clients in this room)
+	for _, c := range r.SFU().clients.GetClients() {
+		mx.AttachPeerConnection(c.PeerConnection().PC())
+	}
+
+	// Helper to add a track processor for a given client and audio track
+	addTrackProcessor := func(clientID string, track ITrack) error {
 
 		session.mu.Lock()
 		defer session.mu.Unlock()
@@ -141,24 +136,19 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		fmt.Printf("adding writer for client %s, track %s", clientID, track.ID())
 
-		if _, ok := session.writers[clientID]; !ok {
-			session.writers[clientID] = make(map[string]*trackWriter)
+		if _, ok := session.tps[clientID]; !ok {
+			session.tps[clientID] = make(map[string]*TrackProcessor)
 		}
 
-		// Check if this specific track already has a writer
-		if _, exists := session.writers[clientID][track.ID()]; exists {
-			fmt.Printf("writer already exists for client %s, track %s", clientID, track.ID())
+		// dedupe per-track
+		if _, exists := session.tps[clientID][track.ID()]; exists {
+			fmt.Printf("tp already exists for client %s, track %s", clientID, track.ID())
 			return nil
 		}
 
-		trackDir := filepath.Join(baseDir, clientID)
-		if err := os.MkdirAll(trackDir, 0755); err != nil {
-			return err
-		}
-		filePath := filepath.Join(trackDir, fmt.Sprintf("%s.ogg", track.ID()))
-
-		sampleRate := uint32(48000) // Default for Opus
-		channelCount := uint16(1)   // Default for Opus
+		// derive basic codec params if needed
+		sampleRate := uint32(48000)
+		_ = sampleRate
 
 		// Use type switch to handle both Track and AudioTrack types
 		var codecParams webrtc.RTPCodecParameters
@@ -176,61 +166,37 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			sampleRate = uint32(codecParams.ClockRate)
 		}
 
-		ow, err := oggwriter.New(filePath, sampleRate, channelCount)
+		// Wire mixer TrackProcessor for this audio track
+		var remote IRemoteTrack
+		switch t := track.(type) {
+		case *AudioTrack:
+			remote = t.RemoteTrack().Track()
+		case *Track:
+			if t.Kind() == webrtc.RTPCodecTypeAudio {
+				remote = t.RemoteTrack().Track()
+			} else {
+				return nil
+			}
+		default:
+			return nil
+		}
+
+		var tp *TrackProcessor
+		var err error
+		// Map client to channel (left/right/both)
+		if channel == ChannelOne {
+			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 0)
+		} else if channel == ChannelTwo {
+			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 1)
+		} else {
+			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 2)
+		}
 		if err != nil {
 			return err
 		}
+		session.tps[clientID][track.ID()] = tp
 
-		// Create trackWriter with buffering
-		tw := &trackWriter{
-			writer:             ow,
-			clockRate:          sampleRate,
-			lastRTPTimestamp:   uint32(rand.IntN(1 << 32)),       // Random initial timestamp
-			lastSeqNum:         uint16(rand.IntN(1 << 16)),       // Random initial sequence number
-			ssrc:               uint32(rand.IntN(1 << 32)),       // Random SSRC
-			lastPacketTime:     time.Time{},                      // Will be set when first packet arrives
-			packetBuffer:       make(chan bufferedPacket, 10000), // Buffer up to 10000 packets
-			stopChan:           make(chan struct{}),
-			recordingStartTime: session.meta.StartTime,
-		}
-
-		session.writers[clientID][track.ID()] = tw
-
-		// Start the packet processor goroutine
-		tw.wg.Add(1)
-		go tw.processPackets()
-
-		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
-			if session.paused || session.stopped {
-				return
-			}
-
-			// Buffer the packet with its arrival time
-			select {
-			case tw.packetBuffer <- bufferedPacket{
-				packet:      pkt.Clone(),
-				arrivalTime: time.Now(),
-			}:
-			default:
-				// Buffer full, try to drop oldest packet and add new one
-				select {
-				case <-tw.packetBuffer:
-					// Dropped oldest packet
-					select {
-					case tw.packetBuffer <- bufferedPacket{
-						packet:      pkt.Clone(),
-						arrivalTime: time.Now(),
-					}:
-					default:
-						fmt.Printf("packet buffer still full for client %s, track %s, dropping packet", clientID, track.ID())
-					}
-				default:
-					fmt.Printf("packet buffer full for client %s, track %s, dropping packet", clientID, track.ID())
-				}
-			}
-		})
-
-		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())
+		fmt.Printf("added mixer processor for client %s, track %s", clientID, track.ID())
 
 		return nil
 	}
@@ -241,7 +207,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		for _, track := range client.Tracks() {
 			// Remove goroutine to avoid race condition
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				if err := addWriter(clientID, track); err != nil {
+				if err := addTrackProcessor(clientID, track); err != nil {
 					fmt.Printf("error adding writer for client %s, track %s: %v", clientID, track.ID(), err)
 				}
 			}
@@ -251,7 +217,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		client.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(clientID, track)
+					_ = addTrackProcessor(clientID, track)
 				}
 			}
 		})
@@ -262,7 +228,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		fmt.Printf("Client Joined: %s", c.ID())
 		for _, track := range c.Tracks() {
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				_ = addWriter(c.ID(), track)
+				_ = addTrackProcessor(c.ID(), track)
 			}
 		}
 
@@ -270,7 +236,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		c.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(c.ID(), track)
+					_ = addTrackProcessor(c.ID(), track)
 				}
 			}
 		})
@@ -280,127 +246,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	return id, nil
 }
 
-// processPackets processes buffered packets in a separate goroutine
-func (tw *trackWriter) processPackets() {
-	defer tw.wg.Done()
-
-	ticker := time.NewTicker(100 * time.Millisecond) // Process buffer every 100ms
-	defer ticker.Stop()
-
-	packetBatch := make([]bufferedPacket, 0, 100)
-
-	for {
-		select {
-		case <-tw.stopChan:
-			// Process any remaining packets
-			tw.drainBuffer(packetBatch)
-			return
-
-		case <-ticker.C:
-			// Collect packets from buffer
-			packetBatch = packetBatch[:0]
-		collectLoop:
-			for {
-				select {
-				case pkt := <-tw.packetBuffer:
-					packetBatch = append(packetBatch, pkt)
-					if len(packetBatch) >= 100 {
-						break collectLoop
-					}
-				default:
-					break collectLoop
-				}
-			}
-
-			// Process collected packets
-			if len(packetBatch) > 0 {
-				tw.processBatch(packetBatch)
-			}
-		}
-	}
-}
-
-// drainBuffer processes all remaining packets in the buffer
-func (tw *trackWriter) drainBuffer(batch []bufferedPacket) {
-	for {
-		select {
-		case pkt := <-tw.packetBuffer:
-			batch = append(batch, pkt)
-		default:
-			if len(batch) > 0 {
-				tw.processBatch(batch)
-			}
-			return
-		}
-	}
-}
-
-// processBatch processes a batch of packets
-func (tw *trackWriter) processBatch(batch []bufferedPacket) {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-
-	for _, bp := range batch {
-		pkt := bp.packet
-
-		// Calculate samples per packet (20ms worth)
-		samplesPerPacket := uint32(tw.clockRate * 20 / 1000)
-
-		// Use wall-clock time to determine actual mute duration
-		var muteDuration time.Duration
-		if tw.lastPacketTime.IsZero() {
-			// First packet - calculate gap from recording start
-			muteDuration = bp.arrivalTime.Sub(tw.recordingStartTime)
-		} else {
-			muteDuration = bp.arrivalTime.Sub(tw.lastPacketTime)
-		}
-
-		// Only insert silence if the gap is significant (> 500ms)
-		// This avoids inserting silence for small processing delays
-		if muteDuration > silencePacketDetectionThreshold {
-			// Calculate number of silent packets needed
-			numSilentPackets := int(muteDuration.Milliseconds() / 20)
-
-			// Insert silence packets
-			for i := 0; i < numSilentPackets; i++ {
-				tw.lastSeqNum++
-				tw.lastRTPTimestamp += samplesPerPacket
-
-				opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
-				silentPkt := &rtp.Packet{
-					Header: rtp.Header{
-						Version:        2,
-						PayloadType:    111,
-						SequenceNumber: tw.lastSeqNum,
-						Timestamp:      tw.lastRTPTimestamp,
-						SSRC:           tw.ssrc,
-					},
-					Payload: opusSilence,
-				}
-
-				if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
-					fmt.Printf("error writing silent packet: %v", err)
-					continue
-				}
-			}
-		}
-
-		// Write the actual packet
-		tw.lastSeqNum++
-		tw.lastRTPTimestamp += samplesPerPacket
-
-		actualPkt := *pkt
-		actualPkt.SequenceNumber = tw.lastSeqNum
-		actualPkt.Timestamp = tw.lastRTPTimestamp
-
-		if err := writeRTPWithSamples(tw.writer, &actualPkt, uint64(samplesPerPacket)); err != nil {
-			fmt.Printf("error writing packet: %v", err)
-		}
-
-		// Update tracking variables
-		tw.lastPacketTime = bp.arrivalTime
-	}
-}
+// legacy packet buffering functions removed
 
 // PauseRecording pauses writing RTP packets to files.
 func (r *Room) PauseRecording() error {
@@ -446,81 +292,18 @@ func (r *Room) StopRecording() error {
 	session.stopped = true
 	session.mu.Unlock()
 
-	// Stop all packet processors and wait for them to finish
+	// Stop all track processors and close mixer to finalize file
 	session.mu.Lock()
-	for _, writerMap := range session.writers {
-		for _, tw := range writerMap {
-			close(tw.stopChan)
+	for _, tpMap := range session.tps {
+		for _, tp := range tpMap {
+			tp.Close()
 		}
 	}
-
-	// Wait for all processors to finish
-	for _, writerMap := range session.writers {
-		for _, tw := range writerMap {
-			tw.wg.Wait()
-		}
-	}
-
-	// Fill silence for any tracks that were muted when recording stopped, if it was not paused
-	for clientID, writerMap := range session.writers {
-		for trackID, tw := range writerMap {
-			tw.mu.Lock()
-
-			// Determine the last time point - either last packet or recording start
-			lastTime := tw.lastPacketTime
-			if lastTime.IsZero() {
-				lastTime = tw.recordingStartTime
-			}
-
-			// Check if there's a gap between last packet and recording stop time
-			gapDuration := session.meta.StopTime.Sub(lastTime)
-
-			// If gap is significant (> 100ms), fill with silence
-			if gapDuration > silencePacketDetectionThreshold {
-				samplesPerPacket := uint32(tw.clockRate * 20 / 1000)
-				numSilentPackets := int(gapDuration.Milliseconds() / 20)
-
-				fmt.Printf("Filling %d silence packets at end for client %s track %s (gap: %v)",
-					numSilentPackets, clientID, trackID, gapDuration)
-
-				// Insert silence packets to fill the gap to recording end
-				for i := 0; i < numSilentPackets; i++ {
-					tw.lastSeqNum++
-					tw.lastRTPTimestamp += samplesPerPacket
-
-					opusSilence := []byte{0xF8, 0xFF, 0xFE} // Opus DTX frame
-					silentPkt := &rtp.Packet{
-						Header: rtp.Header{
-							Version:        2,
-							PayloadType:    111,
-							SequenceNumber: tw.lastSeqNum,
-							Timestamp:      tw.lastRTPTimestamp,
-							SSRC:           tw.ssrc,
-						},
-						Payload: opusSilence,
-					}
-
-					if err := writeRTPWithSamples(tw.writer, silentPkt, uint64(samplesPerPacket)); err != nil {
-						fmt.Printf("error writing end silence for client %s track %s: %v",
-							clientID, trackID, err)
-						break
-					}
-				}
-			}
-
-			tw.mu.Unlock()
-		}
-	}
-
+	mx := session.mixer
 	session.mu.Unlock()
 
-	fmt.Printf("closing writers: %s", session.id)
-
-	// Close writers
-	for _, m := range session.writers {
-		for _, tw := range m {
-			tw.writer.Close()
-		}
+	if mx != nil {
+		_ = mx.Close()
 	}
 
 	fmt.Printf("writing meta.json: %s", session.id)
@@ -540,11 +323,40 @@ func (r *Room) StopRecording() error {
 
 	fmt.Printf("merging and uploading: %s", session.id)
 
-	// Merge channels and upload to S3
+	// Upload to S3 the already-mixed file
 	go func() {
-		if err := r.mergeAndUpload(session); err != nil {
-			fmt.Printf("error merging and uploading: %v", err)
+		baseDir := filepath.Join(session.cfg.BasePath, session.id)
+		finalPath := filepath.Join(baseDir, session.id+".m4a")
+		// If mixer wrote a different extension, fallback to that
+		if _, err := os.Stat(finalPath); err != nil {
+			// try .aac
+			alt := filepath.Join(baseDir, session.id+".aac")
+			if _, err2 := os.Stat(alt); err2 == nil {
+				finalPath = alt
+			} else {
+				return
+			}
 		}
+		// perform upload (minimal wrapper)
+		mc, err := minio.New(session.cfg.S3.Endpoint, &minio.Options{
+			Creds:  credentials.NewStaticV4(session.cfg.S3.AccessKey, session.cfg.S3.SecretKey, ""),
+			Secure: session.cfg.S3.Secure,
+		})
+		if err != nil {
+			fmt.Printf("error creating minio client: %v", err)
+			return
+		}
+		object := path.Join(session.cfg.S3.FilePrefix, session.meta.StartTime.Format("02-01-2006"), filepath.Base(finalPath))
+		contentType := "audio/mp4"
+		if filepath.Ext(finalPath) == ".aac" {
+			contentType = "audio/aac"
+		}
+		if _, err := mc.FPutObject(context.Background(), session.cfg.S3.Bucket, object, finalPath, minio.PutObjectOptions{ContentType: contentType}); err != nil {
+			fmt.Printf("s3 upload failed: %v", err)
+			return
+		}
+		fmt.Printf("uploaded to s3: %s", object)
+		os.RemoveAll(baseDir)
 	}()
 
 	r.recordingMu.Lock()
@@ -590,107 +402,10 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 		return fmt.Errorf("after %d attempts, last error: %w", attempts, err)
 	}
 
-	runCmdWithRetry := func(name string, args ...string) error {
-		return retry(uploadRetryAttempts, uploadRetryDelay, func() error {
-			cmd := exec.Command(name, args...)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("command '%s %v' failed: %w, output: %s", name, args, err, string(out))
-			}
-			return nil
-		})
-	}
+	// runCmdWithRetry no longer used after mixer refactor
 
-	// Group track files by channel
-	filesByChannel := map[ChannelType][]string{}
-	for clientID, writerMap := range session.writers {
-		ch := session.cfg.ChannelMapping[clientID]
-		for trackID := range writerMap {
-			filesByChannel[ch] = append(filesByChannel[ch], filepath.Join(baseDir, clientID, fmt.Sprintf("%s.ogg", trackID)))
-		}
-	}
-	// Create mono mixes per channel
-	monoFiles := map[ChannelType]string{}
-	for _, ch := range []ChannelType{ChannelOne, ChannelTwo} {
-		inputs := filesByChannel[ch]
-		if len(inputs) == 0 {
-			continue
-		}
-		monoPath := filepath.Join(baseDir, fmt.Sprintf("mono_%d.ogg", ch))
-		if len(inputs) == 1 {
-			src := inputs[0]
-			inF, err := os.Open(src)
-			if err != nil {
-				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
-				logError(err.Error())
-				return err
-			}
-			defer inF.Close()
-			outF, err := os.Create(monoPath)
-			if err != nil {
-				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
-				logError(err.Error())
-				return err
-			}
-			defer outF.Close()
-			if _, err := io.Copy(outF, inF); err != nil {
-				err = fmt.Errorf("copy file for channel %d failed: %v", ch, err)
-				logError(err.Error())
-				return err
-			}
-			monoFiles[ch] = monoPath
-			continue
-		}
-		args := []string{"-y"}
-		for _, in := range inputs {
-			args = append(args, "-i", in)
-		}
-		filter := fmt.Sprintf("amix=inputs=%d:duration=longest", len(inputs))
-		args = append(args, "-filter_complex", filter, "-ac", "1", monoPath)
-		if err := runCmdWithRetry("ffmpeg", args...); err != nil {
-			err = fmt.Errorf("ffmpeg mix channel %d failed: %w", ch, err)
-			logError(err.Error())
-			return err
-		}
-		monoFiles[ch] = monoPath
-	}
-	// Merge to stereo
-	finalPath := filepath.Join(baseDir, session.id+".ogg")
-	left, hasLeft := monoFiles[ChannelOne]
-	right, hasRight := monoFiles[ChannelTwo]
-	if hasLeft && hasRight {
-		args := []string{"-y", "-i", left, "-i", right, "-filter_complex", "amerge=inputs=2", "-ac", "2", finalPath}
-		if err := runCmdWithRetry("ffmpeg", args...); err != nil {
-			err = fmt.Errorf("ffmpeg merge stereo failed: %w", err)
-			logError(err.Error())
-			return err
-		}
-	} else if hasLeft || hasRight {
-		src := left
-		if !hasLeft {
-			src = right
-		}
-		if err := os.Rename(src, finalPath); err != nil {
-			logError("failed to rename mono file: %v", err)
-			return err
-		}
-	} else {
-		err := fmt.Errorf("no audio to merge")
-		logError(err.Error())
-		return err
-	}
-	// Convert merged .ogg to .m4a
-	m4aPath := filepath.Join(baseDir, session.id+".m4a")
-	args := []string{"-y", "-i", finalPath, "-c:a", "aac", "-b:a", "32k", m4aPath}
-	if err := runCmdWithRetry("ffmpeg", args...); err != nil {
-		err = fmt.Errorf("ffmpeg convert to m4a failed: %w", err)
-		logError(err.Error())
-		return err
-	}
-
-	if err := os.Remove(finalPath); err != nil {
-		logError("warning: failed to remove merged ogg: %v", err)
-	}
-	finalPath = m4aPath
+	// Mixer already produced final file; nothing to merge here.
+	finalPath := filepath.Join(baseDir, session.id+".m4a")
 
 	// Upload to S3
 	mc, err := minio.New(session.cfg.S3.Endpoint, &minio.Options{
@@ -722,14 +437,4 @@ func (r *Room) mergeAndUpload(session *recordingSession) error {
 	return nil
 }
 
-func writeRTPWithSamples(w *oggwriter.OggWriter, p *rtp.Packet, samples uint64) error {
-	// Use reflection to access private field
-	writer := reflect.ValueOf(w).Elem()
-	granuleField := writer.FieldByName("granule")
-	if granuleField.IsValid() {
-		current := granuleField.Uint()
-		granuleField.SetUint(current + samples)
-	}
-
-	return w.WriteRTP(p)
-}
+// legacy OGG helpers removed
