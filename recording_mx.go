@@ -468,6 +468,8 @@ func (m *Mixer) placeFrameAtNTP(df *DecodedFrame, pktNTP uint64) {
 		}
 		startInFrame = skip
 		relStart = 0
+		// We consumed 'skip' samples from the frame head, so reduce the writable length accordingly
+		frameLen -= skip
 	}
 
 	// Clip tail if exceeds buffer capacity
@@ -481,6 +483,11 @@ func (m *Mixer) placeFrameAtNTP(df *DecodedFrame, pktNTP uint64) {
 
 	baseIdx := relStart * int64(ChannelsOut)
 	endInFrame := startInFrame + frameLen
+	// Ensure we never read past the provided sample slice
+	maxSamples := int64(df.SamplesN)
+	if endInFrame > maxSamples {
+		endInFrame = maxSamples
+	}
 	chanMode := df.Channel
 
 	for si, bi := startInFrame, baseIdx; si < endInFrame; si, bi = si+1, bi+int64(ChannelsOut) {

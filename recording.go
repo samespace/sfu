@@ -20,12 +20,6 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-const (
-	silencePacketDetectionThreshold = 100 * time.Millisecond
-	uploadRetryAttempts             = 3
-	uploadRetryDelay                = 5 * time.Second
-)
-
 type ChannelType int
 
 const (
@@ -146,26 +140,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return nil
 		}
 
-		// derive basic codec params if needed
-		sampleRate := uint32(48000)
-		_ = sampleRate
-
-		// Use type switch to handle both Track and AudioTrack types
-		var codecParams webrtc.RTPCodecParameters
-		switch t := track.(type) {
-		case *Track:
-			codecParams = t.base.codec
-		case *AudioTrack:
-			codecParams = t.Track.base.codec
-		default:
-			r.sfu.log.Warnf("room: unknown track type: %T", track)
-			return nil
-		}
-
-		if codecParams.ClockRate > 0 {
-			sampleRate = uint32(codecParams.ClockRate)
-		}
-
 		// Wire mixer TrackProcessor for this audio track
 		var remote IRemoteTrack
 		switch t := track.(type) {
@@ -184,11 +158,12 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		var tp *TrackProcessor
 		var err error
 		// Map client to channel (left/right/both)
-		if channel == ChannelOne {
+		switch channel {
+		case ChannelOne:
 			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 0)
-		} else if channel == ChannelTwo {
+		case ChannelTwo:
 			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 1)
-		} else {
+		default:
 			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 2)
 		}
 		if err != nil {
@@ -362,78 +337,6 @@ func (r *Room) StopRecording() error {
 	r.recordingMu.Lock()
 	r.recordingSession = nil
 	r.recordingMu.Unlock()
-	return nil
-}
-
-// mergeAndUpload mixes per-channel recordings, merges stereo, uploads to S3, and removes local files.
-func (r *Room) mergeAndUpload(session *recordingSession) error {
-	baseDir := filepath.Join(session.cfg.BasePath, session.id)
-
-	logPath := filepath.Join(baseDir, "error.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		fmt.Printf("error creating log file %s: %v\n", logPath, err)
-	}
-	if logFile != nil {
-		defer logFile.Close()
-	}
-
-	logError := func(format string, v ...interface{}) {
-		msg := fmt.Sprintf(format, v...)
-		fmt.Println(msg) // also print to stdout
-		if logFile != nil {
-			logFile.WriteString(time.Now().Format(time.RFC3339) + " " + msg + "\n")
-		}
-	}
-
-	retry := func(attempts int, sleep time.Duration, fn func() error) error {
-		var err error
-		for i := 0; i < attempts; i++ {
-			if i > 0 {
-				logError("Retrying operation, attempt %d/%d...", i+1, attempts)
-				time.Sleep(sleep)
-			}
-			err = fn()
-			if err == nil {
-				return nil
-			}
-			logError("Operation failed (attempt %d/%d): %v", i+1, attempts, err)
-		}
-		return fmt.Errorf("after %d attempts, last error: %w", attempts, err)
-	}
-
-	// runCmdWithRetry no longer used after mixer refactor
-
-	// Mixer already produced final file; nothing to merge here.
-	finalPath := filepath.Join(baseDir, session.id+".m4a")
-
-	// Upload to S3
-	mc, err := minio.New(session.cfg.S3.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(session.cfg.S3.AccessKey, session.cfg.S3.SecretKey, ""),
-		Secure: session.cfg.S3.Secure,
-	})
-	if err != nil {
-		logError("error creating minio client: %v", err)
-		return err
-	}
-	dateStr := session.meta.StartTime.Format("02-01-2006")
-	object := path.Join(session.cfg.S3.FilePrefix, dateStr, session.id+".m4a")
-	ctx := context.Background()
-
-	uploadFn := func() error {
-		_, err := mc.FPutObject(ctx, session.cfg.S3.Bucket, object, finalPath, minio.PutObjectOptions{ContentType: "audio/mp4"})
-		return err
-	}
-
-	if err := retry(uploadRetryAttempts, uploadRetryDelay, uploadFn); err != nil {
-		logError("s3 upload failed after all retries: %v", err)
-		return err
-	}
-
-	fmt.Printf("uploaded to s3: %s", object)
-	fmt.Printf("removing local files: %s", baseDir)
-	// Cleanup local files
-	os.RemoveAll(baseDir)
 	return nil
 }
 
