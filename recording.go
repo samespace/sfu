@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -306,7 +307,7 @@ func (r *Room) StopRecording() error {
 		return err
 	}
 
-	if err := uploadWithRetry(session.cfg.S3, outPath, session.id, uploadRetryAttempts, uploadRetryDelay); err != nil {
+	if err := uploadWithRetry(session.cfg.S3, outPath, session.id, session.meta.StartTime, uploadRetryAttempts, uploadRetryDelay); err != nil {
 		return err
 	}
 
@@ -563,7 +564,7 @@ func mergeToStereoM4A(leftInputs []string, rightInputs []string, outPath string)
 	return nil
 }
 
-func uploadWithRetry(cfg S3Config, outPath, sessionID string, attempts int, delay time.Duration) error {
+func uploadWithRetry(cfg S3Config, outPath, sessionID string, startTime time.Time, attempts int, delay time.Duration) error {
 	// Validate S3 config
 	if cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.Bucket == "" {
 		return fmt.Errorf("incomplete S3 configuration")
@@ -571,7 +572,7 @@ func uploadWithRetry(cfg S3Config, outPath, sessionID string, attempts int, dela
 
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		if err := uploadToS3(cfg, outPath, sessionID); err != nil {
+		if err := uploadToS3(cfg, outPath, sessionID, startTime); err != nil {
 			lastErr = err
 			if i < attempts-1 {
 				time.Sleep(delay)
@@ -583,7 +584,7 @@ func uploadWithRetry(cfg S3Config, outPath, sessionID string, attempts int, dela
 	return fmt.Errorf("upload failed after %d attempts: %v", attempts, lastErr)
 }
 
-func uploadToS3(cfg S3Config, outPath, sessionID string) error {
+func uploadToS3(cfg S3Config, outPath, sessionID string, startTime time.Time) error {
 	// Check if file exists
 	fileInfo, err := os.Stat(outPath)
 	if err != nil {
@@ -601,7 +602,9 @@ func uploadToS3(cfg S3Config, outPath, sessionID string) error {
 		return fmt.Errorf("failed to create S3 client: %v", err)
 	}
 
-	objectName := filepath.Join(cfg.FilePrefix, fmt.Sprintf("%s.m4a", sessionID))
+	dateStr := startTime.Format("02-01-2006")
+	objectName := path.Join(cfg.FilePrefix, dateStr, sessionID+".m4a")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
