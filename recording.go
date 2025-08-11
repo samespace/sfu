@@ -63,6 +63,11 @@ type recordingSession struct {
 	}
 	baseDir   string
 	recorders map[string]*trackRecorder
+	// Keep track of completed recordings for merging
+	completedFiles struct {
+		left  []string
+		right []string
+	}
 }
 
 // StartRecording begins recording audio tracks in the room according to the provided config.
@@ -156,9 +161,23 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 			track.OnEnded(func() {
 				session.mu.Lock()
-				delete(session.recorders, key)
-				session.mu.Unlock()
-				_ = rec.close()
+				defer session.mu.Unlock()
+
+				// Close the recorder and save the file path before removing
+				if recorder, exists := session.recorders[key]; exists {
+					_ = recorder.close()
+
+					// Add file path to completed files for later merging
+					switch recorder.channel {
+					case ChannelOne:
+						session.completedFiles.left = append(session.completedFiles.left, recorder.filePath)
+					case ChannelTwo:
+						session.completedFiles.right = append(session.completedFiles.right, recorder.filePath)
+					}
+
+					delete(session.recorders, key)
+					fmt.Printf("Track ended for %s, moved to completed files\n", key)
+				}
 			})
 
 			track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
@@ -199,10 +218,12 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		// add a hook for add track too
+		// Capture clientID in closure to avoid variable capture issue
+		capturedClientID := clientID
 		client.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(clientID, track)
+					_ = addWriter(capturedClientID, track)
 				}
 			}
 		})
@@ -210,10 +231,11 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 	// Hook future client additions
 	r.OnClientJoined(func(c *Client) {
-		fmt.Printf("Client Joined: %s\n", c.ID())
+		clientID := c.ID()
+		fmt.Printf("Client Joined: %s\n", clientID)
 		for _, track := range c.Tracks() {
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				_ = addWriter(c.ID(), track)
+				_ = addWriter(clientID, track)
 			}
 		}
 
@@ -221,7 +243,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		c.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(c.ID(), track)
+					_ = addWriter(clientID, track)
 				}
 			}
 		})
@@ -275,14 +297,23 @@ func (r *Room) StopRecording() error {
 	session.mu.Unlock()
 
 	fmt.Printf("closing writers: %s\n", session.id)
-	fmt.Printf("Total recorders: %d\n", len(session.recorders))
+	fmt.Printf("Total active recorders: %d\n", len(session.recorders))
 
 	// close all track recorders and collect file paths
 	session.mu.Lock()
-	leftInputs := make([]string, 0, len(session.recorders)/2)
-	rightInputs := make([]string, 0, len(session.recorders)/2)
+
+	// Start with completed files
+	leftInputs := make([]string, 0, len(session.completedFiles.left)+len(session.recorders)/2)
+	rightInputs := make([]string, 0, len(session.completedFiles.right)+len(session.recorders)/2)
+
+	// Add completed files first
+	leftInputs = append(leftInputs, session.completedFiles.left...)
+	rightInputs = append(rightInputs, session.completedFiles.right...)
+	fmt.Printf("Completed files - Left: %d, Right: %d\n", len(session.completedFiles.left), len(session.completedFiles.right))
+
+	// Close and add any still-active recorders
 	for key, rec := range session.recorders {
-		fmt.Printf("  Closing recorder %s: channel=%v, samples=%d, bytes=%d\n", key, rec.channel, rec.samples, rec.dataBytes)
+		fmt.Printf("  Closing active recorder %s: channel=%v, samples=%d, bytes=%d\n", key, rec.channel, rec.samples, rec.dataBytes)
 		if err := rec.close(); err != nil {
 			fmt.Printf("error closing recorder: %v\n", err)
 		}
@@ -299,7 +330,18 @@ func (r *Room) StopRecording() error {
 	}
 	session.mu.Unlock()
 
-	fmt.Printf("Left inputs: %d, Right inputs: %d\n", len(leftInputs), len(rightInputs))
+	fmt.Printf("Total Left inputs: %d, Right inputs: %d\n", len(leftInputs), len(rightInputs))
+	// Log all file paths for debugging
+	for i, path := range leftInputs {
+		if info, err := os.Stat(path); err == nil {
+			fmt.Printf("  Left[%d]: %s (size: %d bytes)\n", i, path, info.Size())
+		}
+	}
+	for i, path := range rightInputs {
+		if info, err := os.Stat(path); err == nil {
+			fmt.Printf("  Right[%d]: %s (size: %d bytes)\n", i, path, info.Size())
+		}
+	}
 	fmt.Printf("writing meta.json: %s\n", session.id)
 
 	// Write meta.json
