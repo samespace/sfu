@@ -71,7 +71,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	if cfg.BasePath == "" {
 		return "", fmt.Errorf("recording base path is required")
 	}
-	if cfg.ChannelMapping == nil || len(cfg.ChannelMapping) == 0 {
+	if len(cfg.ChannelMapping) == 0 {
 		return "", fmt.Errorf("channel mapping is required")
 	}
 	r.recordingMu.Lock()
@@ -118,6 +118,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	addWriter := func(clientID string, track ITrack) error {
 		channel := cfg.ChannelMapping[clientID]
 		if channel == ChannelUnknown {
+			fmt.Printf("WARNING: Client %s not in channel mapping or mapped to ChannelUnknown, skipping recording\n", clientID)
 			return nil
 		}
 
@@ -178,14 +179,22 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	}
 
 	// Subscribe existing clients' tracks
+	clientCount := len(r.SFU().clients.GetClients())
+	fmt.Printf("Recording starting: Found %d existing clients\n", clientCount)
+	fmt.Printf("Channel mapping: %+v\n", cfg.ChannelMapping)
 	for clientID, client := range r.SFU().clients.GetClients() {
 		fmt.Printf("Client Loop: %s\n", clientID)
-		for _, track := range client.Tracks() {
+		tracks := client.Tracks()
+		fmt.Printf("  Client %s has %d tracks\n", clientID, len(tracks))
+		for _, track := range tracks {
+			fmt.Printf("    Track %s: Kind=%v, MimeType=%s\n", track.ID(), track.Kind(), track.MimeType())
 			// Remove goroutine to avoid race condition
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
 				if err := addWriter(clientID, track); err != nil {
 					fmt.Printf("error adding writer for client %s, track %s: %v\n", clientID, track.ID(), err)
 				}
+			} else {
+				fmt.Printf("    Skipping non-audio track %s\n", track.ID())
 			}
 		}
 
@@ -266,14 +275,20 @@ func (r *Room) StopRecording() error {
 	session.mu.Unlock()
 
 	fmt.Printf("closing writers: %s\n", session.id)
+	fmt.Printf("Total recorders: %d\n", len(session.recorders))
 
 	// close all track recorders and collect file paths
 	session.mu.Lock()
 	leftInputs := make([]string, 0, len(session.recorders)/2)
 	rightInputs := make([]string, 0, len(session.recorders)/2)
-	for _, rec := range session.recorders {
+	for key, rec := range session.recorders {
+		fmt.Printf("  Closing recorder %s: channel=%v, samples=%d, bytes=%d\n", key, rec.channel, rec.samples, rec.dataBytes)
 		if err := rec.close(); err != nil {
 			fmt.Printf("error closing recorder: %v\n", err)
+		}
+		// Check if file has content
+		if info, err := os.Stat(rec.filePath); err == nil {
+			fmt.Printf("    File %s size: %d bytes\n", rec.filePath, info.Size())
 		}
 		switch rec.channel {
 		case ChannelOne:
@@ -284,6 +299,7 @@ func (r *Room) StopRecording() error {
 	}
 	session.mu.Unlock()
 
+	fmt.Printf("Left inputs: %d, Right inputs: %d\n", len(leftInputs), len(rightInputs))
 	fmt.Printf("writing meta.json: %s\n", session.id)
 
 	// Write meta.json
@@ -423,6 +439,10 @@ func (t *trackRecorder) writeRTP(pkt *rtp.Packet) error {
 	defer t.mu.Unlock()
 	if t.closed {
 		return nil
+	}
+	// Log first packet for each recorder
+	if t.samples == 0 {
+		fmt.Printf("First RTP packet received for recorder %s, payload size: %d\n", t.filePath, len(pkt.Payload))
 	}
 	// Decode Opus payload to PCM int16
 	n, err := t.decoder.Decode(pkt.Payload, t.pcmBuffer)
