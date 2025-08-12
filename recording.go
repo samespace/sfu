@@ -309,21 +309,21 @@ func (r *Room) mergeAndUpload(basePath string, id string, oneExists bool, twoExi
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
 			"-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
 			"-filter_complex", "[0:a]afftdn[a0];[1:a]afftdn[a1];[a0][a1]join=inputs=2:channel_layout=stereo[a]",
-			"-map", "[a]", "-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+			"-map", "[a]", "-c:a", "aac", "-b:a", "16k", filepath.Join(basePath, id, "output.m4a"))
 		err := ffmpegCmd.Run()
 		if err != nil {
 			return err
 		}
 	} else if oneExists && !twoExists {
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
-			"-af", "afftdn", "-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+			"-af", "afftdn", "-c:a", "aac", "-b:a", "16k", filepath.Join(basePath, id, "output.m4a"))
 		err := ffmpegCmd.Run()
 		if err != nil {
 			return err
 		}
 	} else if !oneExists && twoExists {
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
-			"-af", "afftdn", "-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+			"-af", "afftdn", "-c:a", "aac", "-b:a", "16k", filepath.Join(basePath, id, "output.m4a"))
 		err := ffmpegCmd.Run()
 		if err != nil {
 			return err
