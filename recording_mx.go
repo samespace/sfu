@@ -4,7 +4,6 @@ package sfu
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/pion/interceptor/pkg/jitterbuffer"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 	opus "gopkg.in/hraban/opus.v2"
 )
@@ -86,7 +86,6 @@ type DecodedFrame struct {
 /////////////////////
 
 type TrackProcessor struct {
-	track   IRemoteTrack
 	jb      *jitterbuffer.JitterBuffer
 	decoder *opus.Decoder
 	outCh   chan *DecodedFrame // send decoded frames to Mixer
@@ -96,18 +95,17 @@ type TrackProcessor struct {
 	channel int
 }
 
-func NewTrackProcessor(track IRemoteTrack, channel int, outCh chan *DecodedFrame, queueSize int) (*TrackProcessor, error) {
+func NewTrackProcessor(ssrc uint32, channel int, outCh chan *DecodedFrame, queueSize int) (*TrackProcessor, error) {
 	dec, err := opus.NewDecoder(SampleRate, 1)
 	if err != nil {
 		return nil, fmt.Errorf("opus.NewDecoder: %w", err)
 	}
 	jb := jitterbuffer.New() // defaults; you can pass options (e.g., WithMinimumPacketCount)
 	tp := &TrackProcessor{
-		track:   track,
 		jb:      jb,
 		decoder: dec,
 		outCh:   outCh,
-		ssrc:    uint32(track.SSRC()),
+		ssrc:    ssrc,
 		channel: channel,
 		pool: &sync.Pool{
 			New: func() interface{} {
@@ -116,8 +114,7 @@ func NewTrackProcessor(track IRemoteTrack, channel int, outCh chan *DecodedFrame
 		},
 		quit: make(chan struct{}),
 	}
-	go tp.rtpReadLoop()
-	go tp.playoutLoop(queueSize)
+	go tp.playoutLoop()
 	return tp, nil
 }
 
@@ -126,24 +123,12 @@ func (t *TrackProcessor) Close() {
 	t.jb.Clear(true)
 }
 
-func (t *TrackProcessor) rtpReadLoop() {
-	for {
-		pkt, _, err := t.track.ReadRTP()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
-			// transient errors — small backoff
-			log.Printf("ReadRTP err (ssrc=%d): %v", t.ssrc, err)
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-		// push into jitter buffer; jitter buffer may drop if full
-		t.jb.Push(pkt)
-	}
+func (t *TrackProcessor) ReadCallback(pkt *rtp.Packet) {
+	// push into jitter buffer; jitter buffer may drop if full
+	t.jb.Push(pkt)
 }
 
-func (t *TrackProcessor) playoutLoop(queueSize int) {
+func (t *TrackProcessor) playoutLoop() {
 	ticker := time.NewTicker(time.Duration(FrameDurationMS) * time.Millisecond)
 	defer ticker.Stop()
 
@@ -354,6 +339,7 @@ func (m *Mixer) UpdateSR(sr *rtcp.SenderReport) {
 		NTPTime: sr.NTPTime,
 		SeenAt:  time.Now(),
 	}
+	fmt.Printf("UpdateSR: %d, %d\n", sr.SSRC, sr.NTPTime)
 	m.sr[sr.SSRC] = info
 }
 
@@ -631,28 +617,8 @@ func (m *Mixer) AttachPeerConnection(pc *webrtc.PeerConnection) {
 }
 
 // AddTrackProcessorForChannel registers a processor for a given explicit channel
-func (m *Mixer) AddTrackProcessorForChannel(track IRemoteTrack, channel int) (*TrackProcessor, error) {
-	tp, err := NewTrackProcessor(track, channel, m.incoming, 64)
-	if err != nil {
-		return nil, err
-	}
-	return tp, nil
-}
-
-// AddTrackProcessor is a small helper to create a TrackProcessor and register to mixer.
-func (m *Mixer) AddTrackProcessor(track IRemoteTrack) (*TrackProcessor, error) {
-	m.procMu.Lock()
-	channel := m.nextChan
-	if m.nextChan < 2 {
-		m.nextChan++
-	} else {
-		// beyond the first two tracks, we mix into both channels
-		m.nextChan++
-		channel = 2
-	}
-	m.procMu.Unlock()
-
-	tp, err := NewTrackProcessor(track, channel, m.incoming, 64)
+func (m *Mixer) AddTrackProcessor(ssrc uint32, channel int) (*TrackProcessor, error) {
+	tp, err := NewTrackProcessor(ssrc, channel, m.incoming, 64)
 	if err != nil {
 		return nil, err
 	}

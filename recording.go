@@ -16,7 +16,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	// "github.com/pion/rtp"
+	"github.com/pion/interceptor"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -57,9 +58,6 @@ type recordingSession struct {
 		Events    []Event
 	}
 }
-
-// bufferedPacket holds an RTP packet along with its arrival time
-// legacy buffered recording types removed in favor of mixer-based recording
 
 // StartRecording begins recording audio tracks using the SR-aligned mixer according to the provided config.
 func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
@@ -120,7 +118,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 	// Helper to add a track processor for a given client and audio track
 	addTrackProcessor := func(clientID string, track ITrack) error {
-
 		session.mu.Lock()
 		defer session.mu.Unlock()
 		channel := cfg.ChannelMapping[clientID]
@@ -141,13 +138,13 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		// Wire mixer TrackProcessor for this audio track
-		var remote IRemoteTrack
+		var ssrc uint32
 		switch t := track.(type) {
 		case *AudioTrack:
-			remote = t.RemoteTrack().Track()
+			ssrc = uint32(t.RemoteTrack().Track().SSRC())
 		case *Track:
 			if t.Kind() == webrtc.RTPCodecTypeAudio {
-				remote = t.RemoteTrack().Track()
+				ssrc = uint32(t.RemoteTrack().Track().SSRC())
 			} else {
 				return nil
 			}
@@ -160,18 +157,24 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		// Map client to channel (left/right/both)
 		switch channel {
 		case ChannelOne:
-			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 0)
+			tp, err = session.mixer.AddTrackProcessor(ssrc, 0)
 		case ChannelTwo:
-			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 1)
+			tp, err = session.mixer.AddTrackProcessor(ssrc, 1)
 		default:
-			tp, err = session.mixer.AddTrackProcessorForChannel(remote, 2)
+			err = fmt.Errorf("invalid channel: %d", channel)
 		}
+
 		if err != nil {
 			return err
 		}
 		session.tps[clientID][track.ID()] = tp
 
-		fmt.Printf("added mixer processor for client %s, track %s", clientID, track.ID())
+		// add a hook for read callback
+		track.OnRead(func(attributes interceptor.Attributes, packet *rtp.Packet, qualityLevel QualityLevel) {
+			tp.ReadCallback(packet)
+		})
+
+		fmt.Printf("added mixer processor for client %s, track %s", clientID, track.ID(), ssrc)
 
 		return nil
 	}
@@ -220,8 +223,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	r.recordingSession = session
 	return id, nil
 }
-
-// legacy packet buffering functions removed
 
 // PauseRecording pauses writing RTP packets to files.
 func (r *Room) PauseRecording() error {
@@ -339,5 +340,3 @@ func (r *Room) StopRecording() error {
 	r.recordingMu.Unlock()
 	return nil
 }
-
-// legacy OGG helpers removed
