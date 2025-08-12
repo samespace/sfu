@@ -172,6 +172,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 
 		// add a hook for read callback
 		track.OnRead(func(attributes interceptor.Attributes, packet *rtp.Packet, qualityLevel QualityLevel) {
+			fmt.Printf("RTP packet received for client %s, track %s, SSRC %d, timestamp %d", clientID, track.ID(), packet.SSRC, packet.Timestamp)
 			tp.ReadCallback(packet)
 		})
 
@@ -281,6 +282,17 @@ func (r *Room) StopRecording() error {
 
 	if mx != nil {
 		_ = mx.Close()
+	}
+
+	// Check if recording duration is too short
+	duration := session.meta.StopTime.Sub(session.meta.StartTime)
+	fmt.Printf("Recording duration: %v", duration)
+	if duration < 1*time.Second {
+		fmt.Printf("WARNING: Recording duration (%v) is very short, file may appear as 0 seconds", duration)
+		// Optional: Wait a bit more to capture any remaining audio
+		fmt.Printf("Waiting additional 1 second to capture any remaining audio...")
+		time.Sleep(1 * time.Second)
+		session.meta.StopTime = time.Now()
 	}
 
 	fmt.Printf("writing meta.json: %s", session.id)

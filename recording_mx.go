@@ -311,6 +311,7 @@ func NewMixer(outputFile string, batchMS int, safetyMS int, bufferSec int) (*Mix
 }
 
 func (m *Mixer) Close() error {
+	fmt.Printf("Mixer closing: total samples written = %d, duration = %.3f seconds", m.writeCursor, float64(m.writeCursor)/float64(SampleRate))
 	m.cancel()
 	// close ffmpeg stdin so it can finalize file
 	if m.ffIn != nil {
