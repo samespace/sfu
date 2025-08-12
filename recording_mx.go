@@ -246,10 +246,6 @@ type Mixer struct {
 	bufferDuration time.Duration
 	outFilename    string
 
-	// track processor bookkeeping (to assign channels)
-	procMu   sync.Mutex
-	nextChan int // to assign 0=left,1=right, >=2 mix
-
 	// NTP origin for absolute timeline mapping and highest mixed index
 	originMu  sync.Mutex
 	originNTP uint64
@@ -358,7 +354,7 @@ func (m *Mixer) getSR(ssrc uint32) (*SRInfo, bool) {
 func (m *Mixer) rtpToNTPUsingSR(ssrc uint32, pktRTP uint32) (uint64, bool) {
 	info, ok := m.getSR(ssrc)
 	if !ok {
-		return 0, false
+		return timeToNTP(time.Now()), true
 	}
 	info.mu.Lock()
 	defer info.mu.Unlock()
