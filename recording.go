@@ -1,14 +1,19 @@
 package sfu
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -264,9 +269,18 @@ func (r *Room) StopRecording() error {
 	session.meta.StopTime = time.Now()
 	session.stopped = true
 
+	oneExists := false
+	twoExists := false
+
 	// stop the mixers
-	session.channelOneMixer.Stop()
-	session.channelTwoMixer.Stop()
+	if session.channelOneMixer != nil {
+		oneExists = true
+		session.channelOneMixer.Stop()
+	}
+	if session.channelTwoMixer != nil {
+		twoExists = true
+		session.channelTwoMixer.Stop()
+	}
 
 	fmt.Printf("writing meta.json: %s", session.id)
 
@@ -283,6 +297,61 @@ func (r *Room) StopRecording() error {
 		return err
 	}
 
+	// merge and upload
+	go r.mergeAndUpload(session.cfg.BasePath, session.id, oneExists, twoExists, session.cfg.S3, session.meta.StartTime)
+
 	r.recordingSession = nil
+	return nil
+}
+
+func (r *Room) mergeAndUpload(basePath string, id string, oneExists bool, twoExists bool, s3 S3Config, startTime time.Time) error {
+	if oneExists && twoExists {
+		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
+			"-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
+			"-filter_complex", "[0:a][1:a]join=inputs=2:channel_layout=stereo[a]",
+			"-map", "[a]", "-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+		err := ffmpegCmd.Run()
+		if err != nil {
+			return err
+		}
+	} else if oneExists && !twoExists {
+		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
+			"-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+		err := ffmpegCmd.Run()
+		if err != nil {
+			return err
+		}
+	} else if !oneExists && twoExists {
+		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
+			"-c:a", "aac", "-b:a", "64k", filepath.Join(basePath, id, "output.m4a"))
+		err := ffmpegCmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Upload to S3
+	mc, err := minio.New(s3.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(s3.AccessKey, s3.SecretKey, ""),
+		Secure: s3.Secure,
+	})
+	if err != nil {
+		fmt.Println("error creating minio client: ", err)
+		return err
+	}
+	dateStr := startTime.Format("02-01-2006")
+	object := path.Join(s3.FilePrefix, dateStr, id+".m4a")
+	ctx := context.Background()
+
+	_, err = mc.FPutObject(ctx, s3.Bucket, object, filepath.Join(basePath, id, "output.m4a"), minio.PutObjectOptions{ContentType: "audio/mp4"})
+	if err != nil {
+		fmt.Println("error uploading to s3: ", err)
+		return err
+	}
+	fmt.Println("uploaded to s3: ", object)
+
+	// Cleanup local files
+	fmt.Println("removing local files: ", filepath.Join(basePath, id))
+	os.RemoveAll(filepath.Join(basePath, id))
 	return nil
 }

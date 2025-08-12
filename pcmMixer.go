@@ -41,6 +41,7 @@ type Mixer struct {
 	running bool
 	ctx     context.Context
 	cancel  context.CancelFunc
+	file    *os.File
 
 	// callback for mixed PCM frame
 	OnMixed func(pcm PCMFrame)
@@ -66,6 +67,7 @@ func NewMixer(filepath string) (*Mixer, error) {
 	if err != nil {
 		return nil, err
 	}
+	m.file = f
 
 	m.OnMixed = func(pcm PCMFrame) {
 		// PCM is []int16 little-endian
@@ -143,6 +145,9 @@ func (m *Mixer) Stop() {
 	m.tick.Stop()
 	m.mu.Lock()
 	m.running = false
+	if m.file != nil {
+		m.file.Close()
+	}
 	m.mu.Unlock()
 }
 
