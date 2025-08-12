@@ -63,10 +63,13 @@ func ntpToTime(ntp uint64) time.Time {
 
 type SRInfo struct {
 	// mapping: RTPTime (uint32) at the instant of NTPTime (uint64)
-	mu      sync.Mutex
 	RTPTime uint32
 	NTPTime uint64 // NTP fixed point (upper 32=seconds, lower 32=fraction)
 	SeenAt  time.Time
+	// Sticky base mapping captured from the very first SR for this SSRC
+	baseRTP uint32
+	baseNTP uint64
+	baseSet bool
 }
 
 /////////////////////
@@ -332,16 +335,28 @@ func (m *Mixer) UpdateSR(sr *rtcp.SenderReport) {
 	m.srMu.Lock()
 	defer m.srMu.Unlock()
 	if existing, ok := m.sr[sr.SSRC]; ok {
-		// Keep the first SR as the stable base mapping to ensure a monotonic timeline.
-		// Only update SeenAt for liveness/debug; do not replace RTP/NTP anchors.
-		existing.SeenAt = time.Now()
-		fmt.Printf("UpdateSR: SSRC=%d (ignored, base mapping already set)\n", sr.SSRC)
+		// Set base mapping once; subsequent SRs only update liveness
+		if !existing.baseSet {
+			existing.baseRTP = sr.RTPTime
+			existing.baseNTP = sr.NTPTime
+			existing.baseSet = true
+			existing.RTPTime = sr.RTPTime
+			existing.NTPTime = sr.NTPTime
+			existing.SeenAt = time.Now()
+			fmt.Printf("UpdateSR: SSRC=%d, RTPTime=%d, NTPTime=%d (base)\n", sr.SSRC, sr.RTPTime, sr.NTPTime)
+		} else {
+			existing.SeenAt = time.Now()
+			fmt.Printf("UpdateSR: SSRC=%d (ignored, base mapping already set)\n", sr.SSRC)
+		}
 		return
 	}
 	info := &SRInfo{
 		RTPTime: sr.RTPTime,
 		NTPTime: sr.NTPTime,
 		SeenAt:  time.Now(),
+		baseRTP: sr.RTPTime,
+		baseNTP: sr.NTPTime,
+		baseSet: true,
 	}
 	fmt.Printf("UpdateSR: SSRC=%d, RTPTime=%d, NTPTime=%d (base)\n", sr.SSRC, sr.RTPTime, sr.NTPTime)
 	m.sr[sr.SSRC] = info
@@ -361,18 +376,15 @@ func (m *Mixer) getSR(ssrc uint32) (*SRInfo, bool) {
 
 func (m *Mixer) rtpToNTPUsingSR(ssrc uint32, pktRTP uint32) (uint64, bool) {
 	info, ok := m.getSR(ssrc)
-	if !ok {
+	if !ok || !info.baseSet {
 		// Fallback: use current time (less accurate but prevents dropping frames)
 		fmt.Printf("WARNING: Using fallback time for SSRC %d", ssrc)
 		return timeToNTP(time.Now()), true
 	}
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	// delta as uint32 (wrap-around handled by uint32 arithmetic)
-	delta := uint32(pktRTP - info.RTPTime)
-	// convert delta samples -> NTP fractional units: (delta << 32) / sampleRate
+	// Use sticky base mapping to avoid drift when new SRs arrive
+	delta := uint32(pktRTP - info.baseRTP)
 	deltaNTP := (uint64(delta) << 32) / m.sampleRate
-	return info.NTPTime + deltaNTP, true
+	return info.baseNTP + deltaNTP, true
 }
 
 /////////////////////
