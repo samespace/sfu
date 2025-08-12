@@ -331,12 +331,19 @@ func (m *Mixer) Close() error {
 func (m *Mixer) UpdateSR(sr *rtcp.SenderReport) {
 	m.srMu.Lock()
 	defer m.srMu.Unlock()
+	if existing, ok := m.sr[sr.SSRC]; ok {
+		// Keep the first SR as the stable base mapping to ensure a monotonic timeline.
+		// Only update SeenAt for liveness/debug; do not replace RTP/NTP anchors.
+		existing.SeenAt = time.Now()
+		fmt.Printf("UpdateSR: SSRC=%d (ignored, base mapping already set)\n", sr.SSRC)
+		return
+	}
 	info := &SRInfo{
 		RTPTime: sr.RTPTime,
 		NTPTime: sr.NTPTime,
 		SeenAt:  time.Now(),
 	}
-	fmt.Printf("UpdateSR: SSRC=%d, RTPTime=%d, NTPTime=%d\n", sr.SSRC, sr.RTPTime, sr.NTPTime)
+	fmt.Printf("UpdateSR: SSRC=%d, RTPTime=%d, NTPTime=%d (base)\n", sr.SSRC, sr.RTPTime, sr.NTPTime)
 	m.sr[sr.SSRC] = info
 }
 
