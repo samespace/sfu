@@ -2,6 +2,7 @@
 package sfu
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -295,6 +296,8 @@ func NewMixer(outputFile string, batchMS int, safetyMS int, bufferSec int) (*Mix
 		},
 	}
 
+	fmt.Printf("Starting ffmpeg with command: ffmpeg -y -f s16le -ar %d -ac %d -i pipe:0 -c:a aac -b:a 64k %s", SampleRate, ChannelsOut, outputFile)
+
 	// start ffmpeg
 	cmd := exec.Command("ffmpeg",
 		"-y",
@@ -310,11 +313,24 @@ func NewMixer(outputFile string, batchMS int, safetyMS int, bufferSec int) (*Mix
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg stdin pipe: %w", err)
 	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg stderr pipe: %w", err)
+	}
 	cmd.Stdout = nil
-	cmd.Stderr = nil
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
+	// Print ffmpeg stderr lines for debugging/visibility
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Printf("ffmpeg: %s", scanner.Text())
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.Printf("ffmpeg stderr read error: %v", scanErr)
+		}
+	}()
 	m.ffIn = stdin
 	m.ffCmd = cmd
 
@@ -415,7 +431,6 @@ func (m *Mixer) frameProcessor() {
 			pktNTP, ok := m.rtpToNTPUsingSR(df.SSRC, df.RTPTime)
 			if !ok {
 				// no SR mapping for this SSRC - dropping frame (for sample-accurate mode).
-				fmt.Printf("WARNING: No SR mapping for SSRC %d, dropping frame (RTPTime: %d)", df.SSRC, df.RTPTime)
 				// You could fallback to time.Now() mapping if you want approximate placement.
 				// return buffer to pool (decoded frame owner should manage pool; here we just discard)
 				// we assume TrackProcessor returns slices to pool itself when it detects drop. But
@@ -593,7 +608,7 @@ func (m *Mixer) tryFlush() {
 			m.cancel()
 			return
 		}
-		fmt.Printf("Wrote %d bytes to ffmpeg (samples: %d, writeCursor: %d)", requiredBytes, toFlush, m.writeCursor)
+
 		m.bytePool.Put(byteBuf)
 		m.writeCursor += toFlush
 
