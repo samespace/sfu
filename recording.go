@@ -122,10 +122,11 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		defer session.mu.Unlock()
 		channel := cfg.ChannelMapping[clientID]
 		if channel == ChannelUnknown {
+			fmt.Printf("No channel mapping for client %s, skipping track %s", clientID, track.ID())
 			return nil
 		}
 
-		fmt.Printf("adding writer for client %s, track %s", clientID, track.ID())
+		fmt.Printf("adding writer for client %s, track %s, channel: %d", clientID, track.ID(), channel)
 
 		if _, ok := session.tps[clientID]; !ok {
 			session.tps[clientID] = make(map[string]*TrackProcessor)
@@ -174,7 +175,7 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			tp.ReadCallback(packet)
 		})
 
-		fmt.Printf("added mixer processor for client %s, track %s", clientID, track.ID(), ssrc)
+		fmt.Printf("added mixer processor for client %s, track %s, ssrc: %d", clientID, track.ID(), ssrc)
 
 		return nil
 	}

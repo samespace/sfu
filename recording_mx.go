@@ -335,7 +335,7 @@ func (m *Mixer) UpdateSR(sr *rtcp.SenderReport) {
 		NTPTime: sr.NTPTime,
 		SeenAt:  time.Now(),
 	}
-	fmt.Printf("UpdateSR: %d, %d\n", sr.SSRC, sr.NTPTime)
+	fmt.Printf("UpdateSR: SSRC=%d, RTPTime=%d, NTPTime=%d\n", sr.SSRC, sr.RTPTime, sr.NTPTime)
 	m.sr[sr.SSRC] = info
 }
 
@@ -354,6 +354,8 @@ func (m *Mixer) getSR(ssrc uint32) (*SRInfo, bool) {
 func (m *Mixer) rtpToNTPUsingSR(ssrc uint32, pktRTP uint32) (uint64, bool) {
 	info, ok := m.getSR(ssrc)
 	if !ok {
+		// Fallback: use current time (less accurate but prevents dropping frames)
+		fmt.Printf("WARNING: Using fallback time for SSRC %d", ssrc)
 		return timeToNTP(time.Now()), true
 	}
 	info.mu.Lock()
@@ -380,6 +382,7 @@ func (m *Mixer) frameProcessor() {
 			pktNTP, ok := m.rtpToNTPUsingSR(df.SSRC, df.RTPTime)
 			if !ok {
 				// no SR mapping for this SSRC - dropping frame (for sample-accurate mode).
+				fmt.Printf("WARNING: No SR mapping for SSRC %d, dropping frame (RTPTime: %d)", df.SSRC, df.RTPTime)
 				// You could fallback to time.Now() mapping if you want approximate placement.
 				// return buffer to pool (decoded frame owner should manage pool; here we just discard)
 				// we assume TrackProcessor returns slices to pool itself when it detects drop. But
@@ -493,6 +496,7 @@ func (m *Mixer) placeFrameAtNTP(df *DecodedFrame, pktNTP uint64) {
 	if absEnd > m.mixEnd {
 		m.mixEnd = absEnd
 	}
+	fmt.Printf("Placed frame for SSRC %d: sampleOffset=%d, frameLen=%d, mixEnd=%d", df.SSRC, sampleOffset, frameLen, m.mixEnd)
 }
 
 /////////////////////
@@ -556,6 +560,7 @@ func (m *Mixer) tryFlush() {
 			m.cancel()
 			return
 		}
+		fmt.Printf("Wrote %d bytes to ffmpeg (samples: %d, writeCursor: %d)", requiredBytes, toFlush, m.writeCursor)
 		m.bytePool.Put(byteBuf)
 		m.writeCursor += toFlush
 
