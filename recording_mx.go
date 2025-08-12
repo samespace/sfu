@@ -96,6 +96,9 @@ type TrackProcessor struct {
 	quit    chan struct{}
 	ssrc    uint32
 	channel int
+	// timeline state for generating synthetic silence aligned to RTP clock
+	lastRTPTime uint32
+	haveRTP     bool
 }
 
 func NewTrackProcessor(ssrc uint32, channel int, outCh chan *DecodedFrame, queueSize int) (*TrackProcessor, error) {
@@ -143,23 +146,27 @@ func (t *TrackProcessor) playoutLoop() {
 			// Pop one RTP packet that is ready for playout.
 			pkt, err := t.jb.Pop()
 			if err != nil {
-				// If still buffering or underflow, produce silence frame and continue
+				// If still buffering or underflow, only emit silence after first real RTP seen
+				if !t.haveRTP {
+					continue
+				}
 				buf := t.pool.Get().([]int16)
 				for i := 0; i < FrameSamples; i++ {
 					buf[i] = 0
 				}
 				df := &DecodedFrame{
 					SSRC:     t.ssrc,
-					RTPTime:  0, // unknown RTP timestamp (we'll mark as zero)
+					RTPTime:  t.lastRTPTime,
 					Samples:  buf,
 					SamplesN: FrameSamples,
 					Channel:  t.channel,
 				}
+				// advance expected RTP for next tick
+				t.lastRTPTime += uint32(FrameSamples)
 				// Non-blocking send to avoid wedging if mixer is slow
 				select {
 				case t.outCh <- df:
 				default:
-					// drop frame and return buffer
 					t.pool.Put(buf)
 				}
 				continue
@@ -182,6 +189,9 @@ func (t *TrackProcessor) playoutLoop() {
 					SamplesN: FrameSamples,
 					Channel:  t.channel,
 				}
+				// initialize/advance RTP timeline reference
+				t.haveRTP = true
+				t.lastRTPTime = pkt.Timestamp + uint32(FrameSamples)
 				select {
 				case t.outCh <- df:
 				default:
@@ -202,6 +212,9 @@ func (t *TrackProcessor) playoutLoop() {
 				SamplesN: FrameSamples,
 				Channel:  t.channel,
 			}
+			// initialize/advance RTP timeline reference
+			t.haveRTP = true
+			t.lastRTPTime = pkt.Timestamp + uint32(FrameSamples)
 			select {
 			case t.outCh <- df:
 			default:
