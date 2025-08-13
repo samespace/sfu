@@ -62,7 +62,6 @@ func newTinyJitterBuffer(maxDelayPackets int) *tinyJitterBuffer {
 }
 
 func (jb *tinyJitterBuffer) push(pkt *rtp.Packet) {
-	fmt.Printf("pushing: %v\n", pkt.Payload)
 	heap.Push(&jb.pq, &rtpPacket{pkt: pkt, seq: pkt.SequenceNumber})
 }
 
@@ -225,7 +224,6 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 			if gap || rtpPkt == nil {
 				zeroSlice(pcm)
 			} else {
-				fmt.Printf("source %s: %v\n", src.ID, rtpPkt.Payload)
 				n, err := dec.Decode(rtpPkt.Payload, pcm)
 				if err != nil || n != SamplesPerFrame {
 					fmt.Printf("error decoding %s: %v\n", src.ID, err)
