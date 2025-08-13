@@ -227,6 +227,7 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 				fmt.Printf("source %s: %d\n", src.ID, len(pcm))
 				n, err := dec.Decode(rtpPkt.Payload, pcm)
 				if err != nil || n != SamplesPerFrame {
+					fmt.Printf("error decoding %s: %d\n", src.ID, len(pcm))
 					zeroSlice(pcm)
 				}
 			}
