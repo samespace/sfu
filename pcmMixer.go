@@ -224,7 +224,7 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 			if gap || rtpPkt == nil {
 				zeroSlice(pcm)
 			} else {
-				fmt.Printf("source %s: %d\n", src.ID, len(pcm))
+				fmt.Printf("source %s: %d\n", src.ID, rtpPkt)
 				n, err := dec.Decode(rtpPkt.Payload, pcm)
 				if err != nil || n != SamplesPerFrame {
 					fmt.Printf("error decoding %s: %v\n", src.ID, err)
