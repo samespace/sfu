@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -189,7 +190,7 @@ func (m *Mixer) AddSource(id string) (*Source, error) {
 	}
 	sourceCtx, cancel := context.WithCancel(m.ctx)
 
-	jb := newTinyJitterBuffer(10) // ~200 ms for 20ms frames
+	jb := newTinyJitterBuffer(4) // ~60 ms for 20ms frames
 	dec, err := opus.NewDecoder(SampleRate, 1)
 	if err != nil {
 		cancel()
@@ -228,18 +229,8 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 					zeroSlice(pcm)
 				}
 			}
-			// Use non-blocking send to prevent deadlock
-			select {
-			case src.pcmCh <- pcm:
-				// Successfully sent
-			case <-ctx.Done():
-				// Context cancelled, return buffer to pool and exit
-				m.putBuf(pcm)
-				return
-			default:
-				// Channel full, drop frame and return buffer to pool
-				m.putBuf(pcm)
-			}
+			fmt.Printf("source %s: %d\n", src.ID, len(pcm))
+			src.pcmCh <- pcm
 		}
 	}
 }
