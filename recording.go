@@ -17,7 +17,6 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"gopkg.in/hraban/opus.v2"
 )
 
 type ChannelType int
@@ -80,15 +79,6 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 	}
 
 	// Record client join/leave events
-	r.OnClientJoined(func(c *Client) {
-		session.mu.Lock()
-		session.meta.Events = append(session.meta.Events, Event{
-			Type: "client_join",
-			Time: time.Now(),
-			Data: map[string]interface{}{"client_id": c.ID()},
-		})
-		session.mu.Unlock()
-	})
 	r.OnClientLeft(func(c *Client) {
 		session.mu.Lock()
 		session.meta.Events = append(session.meta.Events, Event{
@@ -158,22 +148,11 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			return fmt.Errorf("source not found for client %s, track %s", clientID, track.ID())
 		}
 
-		decoder, err := opus.NewDecoder(48000, 1)
-		if err != nil {
-			return err
-		}
-
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
 			if session.paused || session.stopped {
 				return
 			}
-
-			out := make([]int16, SamplesPerFrame)
-			n, err := decoder.Decode(pkt.Payload, out)
-			if err != nil {
-				return
-			}
-			source.pcmCh <- out[:n]
+			source.jb.push(pkt)
 		})
 
 		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())
@@ -196,18 +175,33 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		client.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(clientID, track)
+					if err := addWriter(clientID, track); err != nil {
+						fmt.Printf("error adding writer for client %s, track %s: %v", clientID, track.ID(), err)
+					}
 				}
 			}
 		})
 	}
 
-	// Hook future client additions
+	// Hook future client additions - consolidate with metadata recording
 	r.OnClientJoined(func(c *Client) {
 		fmt.Printf("Client Joined: %s", c.ID())
+
+		// Record client join event in metadata
+		session.mu.Lock()
+		session.meta.Events = append(session.meta.Events, Event{
+			Type: "client_join",
+			Time: time.Now(),
+			Data: map[string]interface{}{"client_id": c.ID()},
+		})
+		session.mu.Unlock()
+
+		// Handle existing tracks
 		for _, track := range c.Tracks() {
 			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				_ = addWriter(c.ID(), track)
+				if err := addWriter(c.ID(), track); err != nil {
+					fmt.Printf("error adding writer for client %s, track %s: %v", c.ID(), track.ID(), err)
+				}
 			}
 		}
 
@@ -215,7 +209,9 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		c.OnTracksReady(func(tracks []ITrack) {
 			for _, track := range tracks {
 				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					_ = addWriter(c.ID(), track)
+					if err := addWriter(c.ID(), track); err != nil {
+						fmt.Printf("error adding writer for client %s, track %s: %v", c.ID(), track.ID(), err)
+					}
 				}
 			}
 		})
@@ -255,8 +251,6 @@ func (r *Room) ResumeRecording() error {
 
 // StopRecording stops the recording session, closes files, and writes metadata.
 func (r *Room) StopRecording() error {
-	fmt.Printf("stopping recording: %s", r.recordingSession.id)
-
 	r.recordingMu.Lock()
 	defer r.recordingMu.Unlock()
 
@@ -264,8 +258,12 @@ func (r *Room) StopRecording() error {
 	if session == nil {
 		return fmt.Errorf("no recording in progress")
 	}
+
+	fmt.Printf("stopping recording: %s", session.id)
+
 	session.mu.Lock()
 	defer session.mu.Unlock()
+
 	session.meta.StopTime = time.Now()
 	session.stopped = true
 
@@ -305,53 +303,66 @@ func (r *Room) StopRecording() error {
 }
 
 func (r *Room) mergeAndUpload(basePath string, id string, oneExists bool, twoExists bool, s3 S3Config, startTime time.Time) error {
+	outputPath := filepath.Join(basePath, id, "output.m4a")
+
 	if oneExists && twoExists {
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
 			"-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
 			"-filter_complex", "[0:a]afftdn[a0];[1:a]afftdn[a1];[a0][a1]join=inputs=2:channel_layout=stereo[a]",
-			"-map", "[a]", "-c:a", "aac", "-b:a", "32k", filepath.Join(basePath, id, "output.m4a"))
-		err := ffmpegCmd.Run()
-		if err != nil {
+			"-map", "[a]", "-c:a", "aac", "-b:a", "32k", outputPath)
+		if err := ffmpegCmd.Run(); err != nil {
+			fmt.Printf("error running ffmpeg for stereo merge: %v", err)
 			return err
 		}
 	} else if oneExists && !twoExists {
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "one.pcm"),
-			"-af", "afftdn", "-c:a", "aac", "-b:a", "32k", filepath.Join(basePath, id, "output.m4a"))
-		err := ffmpegCmd.Run()
-		if err != nil {
+			"-af", "afftdn", "-c:a", "aac", "-b:a", "32k", outputPath)
+		if err := ffmpegCmd.Run(); err != nil {
+			fmt.Printf("error running ffmpeg for channel one: %v", err)
 			return err
 		}
 	} else if !oneExists && twoExists {
 		ffmpegCmd := exec.Command("ffmpeg", "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", filepath.Join(basePath, id, "two.pcm"),
-			"-af", "afftdn", "-c:a", "aac", "-b:a", "32k", filepath.Join(basePath, id, "output.m4a"))
-		err := ffmpegCmd.Run()
-		if err != nil {
+			"-af", "afftdn", "-c:a", "aac", "-b:a", "32k", outputPath)
+		if err := ffmpegCmd.Run(); err != nil {
+			fmt.Printf("error running ffmpeg for channel two: %v", err)
 			return err
 		}
+	} else {
+		// No audio channels to process
+		fmt.Printf("no audio channels to process for recording %s", id)
+		return nil
 	}
 
-	// Upload to S3
+	// Upload to S3 only if we have a valid output file
+	if _, err := os.Stat(outputPath); err != nil {
+		fmt.Printf("output file not found, skipping S3 upload: %v", err)
+		return err
+	}
+
 	mc, err := minio.New(s3.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(s3.AccessKey, s3.SecretKey, ""),
 		Secure: s3.Secure,
 	})
 	if err != nil {
-		fmt.Println("error creating minio client: ", err)
+		fmt.Printf("error creating minio client: %v", err)
 		return err
 	}
+
 	dateStr := startTime.Format("02-01-2006")
 	object := path.Join(s3.FilePrefix, dateStr, id+".m4a")
 	ctx := context.Background()
 
-	_, err = mc.FPutObject(ctx, s3.Bucket, object, filepath.Join(basePath, id, "output.m4a"), minio.PutObjectOptions{ContentType: "audio/mp4"})
+	_, err = mc.FPutObject(ctx, s3.Bucket, object, outputPath, minio.PutObjectOptions{ContentType: "audio/mp4"})
 	if err != nil {
-		fmt.Println("error uploading to s3: ", err)
+		fmt.Printf("error uploading to s3: %v", err)
 		return err
 	}
 	fmt.Println("uploaded to s3: ", object)
 
-	// Cleanup local files
+	// Cleanup local files - happens only if the upload is successful
 	fmt.Println("removing local files: ", filepath.Join(basePath, id))
 	os.RemoveAll(filepath.Join(basePath, id))
+
 	return nil
 }

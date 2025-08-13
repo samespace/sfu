@@ -1,13 +1,95 @@
 package sfu
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/pion/rtp"
+	"gopkg.in/hraban/opus.v2"
 )
+
+type rtpPacket struct {
+	pkt   *rtp.Packet
+	seq   uint16
+	index int
+}
+
+type packetHeap []*rtpPacket
+
+func (ph packetHeap) Len() int { return len(ph) }
+func (ph packetHeap) Less(i, j int) bool {
+	return int16(ph[i].seq-ph[j].seq) < 0
+}
+func (ph packetHeap) Swap(i, j int) {
+	ph[i], ph[j] = ph[j], ph[i]
+	ph[i].index = i
+	ph[j].index = j
+}
+func (ph *packetHeap) Push(x interface{}) {
+	n := len(*ph)
+	pkt := x.(*rtpPacket)
+	pkt.index = n
+	*ph = append(*ph, pkt)
+}
+func (ph *packetHeap) Pop() interface{} {
+	old := *ph
+	n := len(old)
+	pkt := old[n-1]
+	old[n-1] = nil
+	pkt.index = -1
+	*ph = old[0 : n-1]
+	return pkt
+}
+
+type tinyJitterBuffer struct {
+	pq          packetHeap
+	maxDelay    int
+	expectedSeq uint16
+	started     bool
+}
+
+func newTinyJitterBuffer(maxDelayPackets int) *tinyJitterBuffer {
+	return &tinyJitterBuffer{
+		pq:       make(packetHeap, 0, maxDelayPackets*2),
+		maxDelay: maxDelayPackets,
+	}
+}
+
+func (jb *tinyJitterBuffer) push(pkt *rtp.Packet) {
+	heap.Push(&jb.pq, &rtpPacket{pkt: pkt, seq: pkt.SequenceNumber})
+}
+
+func (jb *tinyJitterBuffer) popNext() (out *rtp.Packet, gap bool) {
+	if !jb.started {
+		if jb.pq.Len() >= jb.maxDelay {
+			first := heap.Pop(&jb.pq).(*rtpPacket)
+			jb.expectedSeq = first.seq + 1
+			jb.started = true
+			return first.pkt, false
+		}
+		return nil, false
+	}
+
+	if jb.pq.Len() == 0 {
+		return nil, false
+	}
+
+	next := jb.pq[0]
+	if next.seq == jb.expectedSeq {
+		heap.Pop(&jb.pq)
+		jb.expectedSeq++
+		return next.pkt, false
+	}
+
+	// gap — insert silence
+	jb.expectedSeq++
+	return nil, true
+}
 
 // Constants - tuned for WebRTC typical values
 const (
@@ -30,6 +112,10 @@ type Source struct {
 	cancel context.CancelFunc
 
 	// low-latency jitter buffer / sequence based reading can be added here
+	jb *tinyJitterBuffer
+
+	// decoder
+	dec *opus.Decoder
 }
 
 // Mixer mixes multiple sources
@@ -101,15 +187,61 @@ func (m *Mixer) AddSource(id string) (*Source, error) {
 	if _, ok := m.sources[id]; ok {
 		return nil, errors.New("source exists")
 	}
-	_, cancel := context.WithCancel(m.ctx)
+	sourceCtx, cancel := context.WithCancel(m.ctx)
+
+	jb := newTinyJitterBuffer(10) // ~200 ms for 20ms frames
+	dec, err := opus.NewDecoder(SampleRate, 1)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
 	s := &Source{
 		ID:     id,
-		pcmCh:  make(chan PCMFrame, 4), // small ring
+		pcmCh:  make(chan PCMFrame, 10), // small ring
 		cancel: cancel,
+		jb:     jb,
+		dec:    dec,
 	}
 	m.sources[id] = s
 
+	go m.startSource(sourceCtx, s, jb, dec)
+
 	return s, nil
+}
+
+func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuffer, dec *opus.Decoder) {
+	ticker := time.NewTicker(FrameMs * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rtpPkt, gap := jb.popNext()
+			pcm := m.getBuf()
+			if gap || rtpPkt == nil {
+				zeroSlice(pcm)
+			} else {
+				n, err := dec.Decode(rtpPkt.Payload, pcm)
+				if err != nil || n != SamplesPerFrame {
+					zeroSlice(pcm)
+				}
+			}
+			// Use non-blocking send to prevent deadlock
+			select {
+			case src.pcmCh <- pcm:
+				// Successfully sent
+			case <-ctx.Done():
+				// Context cancelled, return buffer to pool and exit
+				m.putBuf(pcm)
+				return
+			default:
+				// Channel full, drop frame and return buffer to pool
+				m.putBuf(pcm)
+			}
+		}
+	}
 }
 
 // RemoveSource
@@ -122,6 +254,12 @@ func (m *Mixer) RemoveSource(id string) {
 	m.mu.Unlock()
 	if ok {
 		s.cancel()
+		// Wait a bit for writers to stop, then close
+		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-s.pcmCh: // drain
+		default:
+		}
 		close(s.pcmCh)
 	}
 }
@@ -146,7 +284,10 @@ func (m *Mixer) Stop() {
 	m.mu.Lock()
 	m.running = false
 	if m.file != nil {
-		m.file.Close()
+		if err := m.file.Close(); err != nil {
+			log.Printf("Error closing mixer file: %v", err)
+		}
+		m.file = nil
 	}
 	m.mu.Unlock()
 }
