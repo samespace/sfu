@@ -224,12 +224,12 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 			if gap || rtpPkt == nil {
 				zeroSlice(pcm)
 			} else {
+				fmt.Printf("source %s: %d\n", src.ID, len(pcm))
 				n, err := dec.Decode(rtpPkt.Payload, pcm)
 				if err != nil || n != SamplesPerFrame {
 					zeroSlice(pcm)
 				}
 			}
-			fmt.Printf("source %s: %d\n", src.ID, len(pcm))
 			src.pcmCh <- pcm
 		}
 	}
