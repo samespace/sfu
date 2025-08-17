@@ -152,7 +152,12 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 			if session.paused || session.stopped {
 				return
 			}
-			source.jb.push(pkt.Clone())
+			if pkt != nil {
+				cloned := pkt.Clone()
+				if cloned != nil {
+					source.jb.push(cloned)
+				}
+			}
 		})
 
 		fmt.Printf("added writer for client %s, track %s", clientID, track.ID())

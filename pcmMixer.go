@@ -190,7 +190,7 @@ func (m *Mixer) AddSource(id string) (*Source, error) {
 	}
 	sourceCtx, cancel := context.WithCancel(m.ctx)
 
-	jb := newTinyJitterBuffer(4) // ~60 ms for 20ms frames
+	jb := newTinyJitterBuffer(10) // ~200 ms for 20ms frames
 	dec, err := opus.NewDecoder(SampleRate, 1)
 	if err != nil {
 		cancel()
