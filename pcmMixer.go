@@ -48,6 +48,7 @@ func (ph *packetHeap) Pop() interface{} {
 }
 
 type tinyJitterBuffer struct {
+	mu          sync.Mutex
 	pq          packetHeap
 	maxDelay    int
 	expectedSeq uint16
@@ -62,10 +63,15 @@ func newTinyJitterBuffer(maxDelayPackets int) *tinyJitterBuffer {
 }
 
 func (jb *tinyJitterBuffer) push(pkt *rtp.Packet) {
+	jb.mu.Lock()
 	heap.Push(&jb.pq, &rtpPacket{pkt: pkt, seq: pkt.SequenceNumber})
+	jb.mu.Unlock()
 }
 
 func (jb *tinyJitterBuffer) popNext() (out *rtp.Packet, gap bool) {
+	jb.mu.Lock()
+	defer jb.mu.Unlock()
+
 	if !jb.started {
 		if jb.pq.Len() >= jb.maxDelay {
 			first := heap.Pop(&jb.pq).(*rtpPacket)
@@ -190,7 +196,7 @@ func (m *Mixer) AddSource(id string) (*Source, error) {
 	}
 	sourceCtx, cancel := context.WithCancel(m.ctx)
 
-	jb := newTinyJitterBuffer(10) // ~200 ms for 20ms frames
+	jb := newTinyJitterBuffer(4) // ~60 ms for 20ms frames
 	dec, err := opus.NewDecoder(SampleRate, 1)
 	if err != nil {
 		cancel()
