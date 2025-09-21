@@ -50,56 +50,14 @@ func (c *bitrateClaim) SendBitrate() uint32 {
 }
 
 func (c *bitrateClaim) IsAdjustable() bool {
-	return c.track.IsSimulcast() || c.track.IsScaleable()
+	// Audio tracks are generally not adjustable like video simulcast/SVC
+	return false
 }
 
 func (c *bitrateClaim) QualityLevelToBitrate(quality QualityLevel) uint32 {
-	if c.track.IsSimulcast() {
-		t := c.track.(*simulcastClientTrack)
-		switch quality {
-		case QualityLow:
-			return t.ReceiveBitrateAtQuality(QualityLow)
-		case QualityLowMid:
-			return t.ReceiveBitrateAtQuality(QualityLowMid)
-		case QualityLowLow:
-			return t.ReceiveBitrateAtQuality(QualityLowLow)
-		case QualityMid:
-			return t.ReceiveBitrateAtQuality(QualityMid)
-		case QualityMidMid:
-			return t.ReceiveBitrateAtQuality(QualityMidMid)
-		case QualityMidLow:
-			return t.ReceiveBitrateAtQuality(QualityMidLow)
-		case QualityHigh:
-			return t.ReceiveBitrateAtQuality(QualityHigh)
-		case QualityHighMid:
-			return t.ReceiveBitrateAtQuality(QualityHighMid)
-		case QualityHighLow:
-			return t.ReceiveBitrateAtQuality(QualityHighLow)
-		}
-	} else {
-		switch quality {
-		case QualityLowLow:
-			return c.track.ReceiveBitrate() / 16
-		case QualityLowMid:
-			return c.track.ReceiveBitrate() / 8
-		case QualityLow:
-			return c.track.ReceiveBitrate() / 4
-		case QualityMidLow:
-			return c.track.ReceiveBitrate() / 8
-		case QualityMidMid:
-			return c.track.ReceiveBitrate() / 4
-		case QualityMid:
-			return c.track.ReceiveBitrate() / 2
-		case QualityHighLow:
-			return c.track.ReceiveBitrate() / 4
-		case QualityHighMid:
-			return c.track.ReceiveBitrate() / 2
-		case QualityHigh:
-			return c.track.ReceiveBitrate()
-		}
-	}
-
-	return 0
+	// For audio-only SFU, we don't have complex quality scaling like video
+	// Just return the receive bitrate as audio bitrate is generally constant
+	return c.track.ReceiveBitrate()
 }
 
 type bitrateController struct {
@@ -305,12 +263,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 				continue
 			}
 
-			// set last quality that use for requesting PLI after claim added
-			if clientTrack.IsSimulcast() {
-				clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
-			} else if clientTrack.IsScaleable() {
-				clientTrack.(*scaleableClientTrack).setLastQuality(trackQuality)
-			}
+			// Audio tracks don't need PLI quality management like video tracks
 
 			_, err := bc.addClaim(clientTrack, trackQuality)
 			if err != nil {
@@ -547,38 +500,8 @@ func (bc *bitrateController) getPrevQuality(quality QualityLevel) QualityLevel {
 }
 
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
-	val, ok := bc.claims.Load(videoSize.TrackID)
-	if !ok {
-		bc.log.Errorf("bitrate: track %s is not exists", videoSize.TrackID)
-		return
-	}
-
-	claim := val.(*bitrateClaim)
-
-	if claim.track.Kind() != webrtc.RTPCodecTypeVideo {
-		bc.log.Errorf("bitrate: track %s is not video track", videoSize.TrackID)
-		return
-	}
-
-	bc.log.Debugf("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
-
-	// TODO: check if it is necessary to set max quality to none
-	if videoSize.Width == 0 || videoSize.Height == 0 {
-		bc.log.Debugf("bitrate: track  %s video size is 0, set max quality to none", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityNone)
-		return
-	}
-
-	if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoLowPixels {
-		bc.log.Debugf("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoMidPixels {
-		bc.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityMid)
-	} else {
-		bc.log.Infof("bitrate: track %s video size is high, set max quality to high", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityHigh)
-	}
+	// Video size changes not applicable to audio-only SFU
+	// This function is kept for interface compatibility but does nothing
 }
 
 func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, claim *bitrateClaim) bool {

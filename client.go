@@ -555,52 +555,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			client.onTrack(track)
 			track.SetAsProcessed()
 		} else {
-			// simulcast
-			var simulcast *SimulcastTrack
-			var ok bool
-
-			id := remoteTrack.ID()
-
-			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
-
-			if err != nil {
-				// if track not found, add it
-				track = newSimulcastTrack(client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
-				if err := client.tracks.Add(track); err != nil {
-					client.log.Errorf("client: error add track ", err)
-				}
-
-				track.OnEnded(func() {
-					simulcastTrack := track.(*SimulcastTrack)
-
-					simulcastTrack.mu.Lock()
-
-					if simulcastTrack.remoteTrackHigh != nil {
-						client.stats.removeReceiverStats(simulcastTrack.remoteTrackHigh.track.ID() + simulcastTrack.remoteTrackHigh.track.RID())
-					}
-
-					if simulcastTrack.remoteTrackMid != nil {
-						client.stats.removeReceiverStats(simulcastTrack.remoteTrackMid.track.ID() + simulcastTrack.remoteTrackMid.track.RID())
-					}
-
-					if simulcastTrack.remoteTrackLow != nil {
-						client.stats.removeReceiverStats(simulcastTrack.remoteTrackLow.track.ID() + simulcastTrack.remoteTrackLow.track.RID())
-					}
-
-					simulcastTrack.mu.Unlock()
-
-					client.tracks.remove([]string{remoteTrack.ID()})
-				})
-
-			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
-			}
-
-			if !track.IsProcessed() {
-				client.onTrack(track)
-				track.SetAsProcessed()
-			}
-
+			// For audio-only SFU, we don't support simulcast or RID-based tracks
+			// This should not happen in normal voice-only operation
+			client.log.Warnf("client: RID-based track not supported in audio-only SFU: %s", remoteTrack.RID())
 		}
 	})
 
@@ -1043,19 +1000,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		return nil
 	}
 
-	if t.IsSimulcast() {
-		simulcastTrack := t.(*SimulcastTrack)
-		outputTrack = simulcastTrack.subscribe(c)
-
+	// Audio-only SFU doesn't support simulcast
+	if t.Kind() == webrtc.RTPCodecTypeAudio {
+		audioTrack := t.(*AudioTrack)
+		outputTrack = audioTrack.subscribe(c)
 	} else {
-		if t.Kind() == webrtc.RTPCodecTypeAudio {
-			singleTrack := t.(*AudioTrack)
-			outputTrack = singleTrack.subscribe(c)
-		} else {
-			singleTrack := t.(*Track)
-			outputTrack = singleTrack.subscribe(c)
-		}
-
+		// Should not happen in audio-only SFU
+		c.log.Warnf("client: non-audio track not supported in audio-only SFU: %s", t.Kind())
+		return nil
 	}
 
 	localTrack := outputTrack.LocalTrack()
@@ -1540,13 +1492,8 @@ func (c *Client) SetQuality(quality QualityLevel) {
 
 	c.log.Infof("client: %s switch quality to %s", c.ID, quality)
 	c.quality.Store(uint32(quality))
-	for _, claim := range c.bitrateController.Claims() {
-		if claim.track.IsSimulcast() {
-			claim.track.(*simulcastClientTrack).remoteTrack.sendPLI()
-		} else if claim.track.IsScaleable() {
-			claim.track.RequestPLI()
-		}
-	}
+	// Audio tracks don't need PLI (Picture Loss Indication) like video tracks
+	// This functionality is not needed for voice-only SFU
 }
 
 // GetEstimatedBandwidth returns the estimated bandwidth in bits per second based on
@@ -1678,71 +1625,27 @@ func (c *Client) Stats() ClientTrackStats {
 	}
 
 	for _, track := range c.Tracks() {
-		if track.IsSimulcast() {
-			simulcastClientTrack := track.(*SimulcastTrack)
-			if simulcastClientTrack.remoteTrackHigh != nil {
-				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackHigh.Track().ID(), simulcastClientTrack.remoteTrackHigh.Track().RID())
-				if err == nil {
-					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackHigh.Track(), stats)
-					if err == nil {
-						clientStats.Receives = append(clientStats.Receives, receivedStats)
-					}
-				}
+		// Audio-only SFU doesn't support simulcast
+		var receivedStats TrackReceivedStats
 
+		if track.Kind() == webrtc.RTPCodecTypeAudio {
+			t := track.(*AudioTrack)
+			stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
+			if err != nil {
+				continue
 			}
 
-			if simulcastClientTrack.remoteTrackMid != nil {
-				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackMid.Track().ID(), simulcastClientTrack.remoteTrackMid.Track().RID())
-				if err == nil {
-					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackMid.Track(), stats)
-					if err == nil {
-						clientStats.Receives = append(clientStats.Receives, receivedStats)
-					}
-				}
-
+			receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
+			if err != nil {
+				continue
 			}
-
-			if simulcastClientTrack.remoteTrackLow != nil {
-				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackLow.Track().ID(), simulcastClientTrack.remoteTrackLow.Track().RID())
-				if err == nil {
-					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackLow.Track(), stats)
-					if err == nil {
-						clientStats.Receives = append(clientStats.Receives, receivedStats)
-					}
-				}
-
-			}
-
 		} else {
-			var receivedStats TrackReceivedStats
-
-			if track.Kind() == webrtc.RTPCodecTypeAudio {
-				t := track.(*AudioTrack)
-				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
-				if err != nil {
-					continue
-				}
-
-				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
-				if err != nil {
-					continue
-				}
-			} else {
-				t := track.(*Track)
-				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
-				if err != nil {
-					continue
-				}
-
-				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
-				if err != nil {
-					continue
-				}
-			}
-
-			clientStats.Receives = append(clientStats.Receives, receivedStats)
+			// Should not happen in audio-only SFU, but handle gracefully
+			c.log.Warnf("client: non-audio track in stats: %s", track.Kind())
+			continue
 		}
 
+		clientStats.Receives = append(clientStats.Receives, receivedStats)
 	}
 
 	for id, stat := range c.stats.Senders() {

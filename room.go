@@ -93,10 +93,12 @@ type RoomOptions struct {
 func DefaultRoomOptions() RoomOptions {
 	pli := time.Duration(0)
 	emptyDuration := time.Duration(3) * time.Minute
+	// Audio-only quality levels - simplified for voice communication
+	audioQualityLevels := []QualityLevel{QualityAudioRed, QualityAudio}
 	return RoomOptions{
 		Bitrates:         DefaultBitrates(),
-		QualityLevels:    DefaultQualityLevels(),
-		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
+		QualityLevels:    audioQualityLevels,
+		Codecs:           &[]string{"audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypeG722, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
 		PLIInterval:      &pli,
 		EmptyRoomTimeout: &emptyDuration,
 	}

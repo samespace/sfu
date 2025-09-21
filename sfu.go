@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -11,35 +12,19 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// BitrateConfigs is the configuration for the bitrate that will be used for adaptive bitrates controller
-// The paramenter is in bps (bit per second) for non pixels parameters.
-// For pixels parameters, it is total pixels (width * height) of the video.
-// High, Mid, and Low are the references for bitrate controller to decide the max bitrate to send to the client.
+// BitrateConfigs is the configuration for audio bitrates in the voice-only SFU
+// All parameters are in bps (bits per second)
 type BitrateConfigs struct {
 	AudioRed         uint32 `json:"audio_red" example:"75000"`
 	Audio            uint32 `json:"audio" example:"48000"`
-	Video            uint32 `json:"video" example:"1200000"`
-	VideoHigh        uint32 `json:"video_high" example:"1200000"`
-	VideoHighPixels  uint32 `json:"video_high_pixels" example:"921600"`
-	VideoMid         uint32 `json:"video_mid" example:"500000"`
-	VideoMidPixels   uint32 `json:"video_mid_pixels" example:"259200"`
-	VideoLow         uint32 `json:"video_low" example:"150000"`
-	VideoLowPixels   uint32 `json:"video_low_pixels" example:"64800"`
-	InitialBandwidth uint32 `json:"initial_bandwidth" example:"1000000"`
+	InitialBandwidth uint32 `json:"initial_bandwidth" example:"200000"`
 }
 
 func DefaultBitrates() BitrateConfigs {
 	return BitrateConfigs{
-		AudioRed:         75_000,
-		Audio:            48_000,
-		Video:            700_000,
-		VideoHigh:        700_000,
-		VideoHighPixels:  720 * 360,
-		VideoMid:         300_000,
-		VideoMidPixels:   360 * 180,
-		VideoLow:         90_000,
-		VideoLowPixels:   180 * 90,
-		InitialBandwidth: 1_000_000,
+		AudioRed:         75_000,  // For RED (Redundant Encoding) audio
+		Audio:            48_000,  // Standard Opus audio bitrate
+		InitialBandwidth: 200_000, // Much lower initial bandwidth for voice-only
 	}
 }
 
@@ -431,27 +416,14 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, clien
 	onPLI := func() {}
 
 	if rid == "" {
-		// not simulcast
+		// Standard audio track (no simulcast in audio-only SFU)
 		track = newTrack(ctx, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
 		s.mu.Lock()
 		s.relayTracks[relayTrack.ID()] = track
 		s.mu.Unlock()
 	} else {
-		// simulcast
-		var simulcast *SimulcastTrack
-		var ok bool
-
-		s.mu.Lock()
-		track, ok := s.relayTracks[relayTrack.ID()]
-		if !ok {
-			// if track not found, add it
-			track = newSimulcastTrack(client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
-			s.relayTracks[relayTrack.ID()] = track
-
-		} else if simulcast, ok = track.(*SimulcastTrack); ok {
-			simulcast.AddRemoteTrack(relayTrack, 0, 0, nil, nil, onPLI)
-		}
-		s.mu.Unlock()
+		// RID-based tracks not supported in audio-only SFU
+		return fmt.Errorf("RID-based relay tracks not supported in audio-only SFU: %s", rid)
 	}
 
 	// TODO: replace to with subscribe to all available tracks

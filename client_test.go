@@ -107,6 +107,9 @@ Loop:
 // TODO: this is can't be work without a new SimulcastLocalTrack that can add header extension to the packet
 
 func TestSimulcastTrack(t *testing.T) {
+	t.Skip("Simulcast functionality removed in audio-only SFU")
+	return
+	// Test disabled as simulcast is not supported in voice-only SFU
 	report := CheckRoutines(t)
 	defer report()
 
@@ -118,89 +121,92 @@ func TestSimulcastTrack(t *testing.T) {
 
 	defer roomManager.Close()
 
-	roomID := roomManager.CreateRoomID()
-	roomName := "test-room"
+	// roomID := roomManager.CreateRoomID()
+	// roomName := "test-room"
 
-	// create new room
-	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
-	require.NoError(t, err, "error creating room: %v", err)
+	// create new room (commented out for audio-only SFU)
+	// roomOpts := DefaultRoomOptions()
+	// roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	// testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
+	// require.NoError(t, err, "error creating room: %v", err)
 
-	simulcastChan := make(chan *SimulcastTrack)
+	// simulcastChan := make(chan *SimulcastTrack)
 
-	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1", simulcastChan)
-	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2", simulcastChan)
+	// client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1", simulcastChan)
+	// client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2", simulcastChan)
 
-	defer func() {
-		_ = testRoom.StopClient(client1.id)
-		_ = testRoom.StopClient(client2.id)
-	}()
-
-	trackChan := make(chan *webrtc.TrackRemote)
-
-	pc1.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		trackChan <- track
-	})
-
-	pc2.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		trackChan <- track
-	})
-
-	// wait for track added
-	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelTimeout()
-
-	trackCount := 0
-	simulcastCount := 0
-Loop:
-	for {
-		select {
-		case <-timeout.Done():
-			t.Fatal("timeout waiting for track added")
-			break Loop
-		case <-trackChan:
-			trackCount++
-			t.Log("track added ", trackCount)
-
-		case simulcastTrack := <-simulcastChan:
-			go func() {
-				ctxx, cancell := context.WithCancel(ctx)
-				defer cancell()
-
-				ticker := time.NewTicker(1 * time.Second)
-				defer ticker.Stop()
-
-				for {
-					select {
-					case <-ctxx.Done():
-						return
-					case <-ticker.C:
-
-						if simulcastTrack.remoteTrackHigh != nil &&
-							simulcastTrack.remoteTrackMid != nil &&
-							simulcastTrack.remoteTrackLow != nil {
-							simulcastCount++
-							t.Log("simulcast track complete ", simulcastCount)
-							return
-						}
-
-					}
-				}
+	/*
+			defer func() {
+				_ = testRoom.StopClient(client1.id)
+				_ = testRoom.StopClient(client2.id)
 			}()
 
-		default:
-			if trackCount == 2 && simulcastCount == 2 {
-				break Loop
+			trackChan := make(chan *webrtc.TrackRemote)
+
+			pc1.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+				trackChan <- track
+			})
+
+			pc2.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+				trackChan <- track
+			})
+
+			// wait for track added
+			timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+			defer cancelTimeout()
+
+			trackCount := 0
+			simulcastCount := 0
+		Loop:
+			for {
+				select {
+				case <-timeout.Done():
+					t.Fatal("timeout waiting for track added")
+					break Loop
+				case <-trackChan:
+					trackCount++
+					t.Log("track added ", trackCount)
+
+				case simulcastTrack := <-simulcastChan:
+					go func() {
+						ctxx, cancell := context.WithCancel(ctx)
+						defer cancell()
+
+						ticker := time.NewTicker(1 * time.Second)
+						defer ticker.Stop()
+
+						for {
+							select {
+							case <-ctxx.Done():
+								return
+							case <-ticker.C:
+
+								if simulcastTrack.remoteTrackHigh != nil &&
+									simulcastTrack.remoteTrackMid != nil &&
+									simulcastTrack.remoteTrackLow != nil {
+									simulcastCount++
+									t.Log("simulcast track complete ", simulcastCount)
+									return
+								}
+
+							}
+						}
+					}()
+
+				default:
+					if trackCount == 2 && simulcastCount == 2 {
+						break Loop
+					}
+
+				}
 			}
 
-		}
-	}
-
-	require.Equal(t, 2, trackCount)
-	require.Equal(t, 2, simulcastCount)
+			require.Equal(t, 2, trackCount)
+			require.Equal(t, 2, simulcastCount)
+	*/
 }
 
+/*
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string, simulcastTrackChan chan *SimulcastTrack) (*Client, *webrtc.PeerConnection) {
 	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, room, DefaultTestIceServers(), peerName, true, true, true)
 	client.OnTracksAvailable(func(availableTracks []ITrack) {
@@ -225,6 +231,7 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 
 	return client, pc.PeerConnection
 }
+*/
 
 func TestClientDataChannel(t *testing.T) {
 	report := CheckRoutines(t)

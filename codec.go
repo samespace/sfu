@@ -1,9 +1,6 @@
 package sfu
 
 import (
-	"encoding/binary"
-	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -15,184 +12,61 @@ import (
 )
 
 var (
-	videoRTCPFeedback = []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
-	videoCodecs       = []webrtc.RTPCodecParameters{
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
-			PayloadType:        96,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=96", nil},
-			PayloadType:        97,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 102,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=102", nil},
-			PayloadType:        103,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 104,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=104", nil},
-			PayloadType:        105,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 106,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=106", nil},
-			PayloadType:        107,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 108,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=108", nil},
-			PayloadType:        109,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 127,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=127", nil},
-			PayloadType:        125,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264,
-				90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=4d001f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 39,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=39", nil},
-			PayloadType:        40,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				MimeType:     webrtc.MimeTypeH265,
-				ClockRate:    90000,
-				RTCPFeedback: videoRTCPFeedback,
-			},
-			PayloadType: 116,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=116", nil},
-			PayloadType:        117,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeAV1, 90000, 0, "", videoRTCPFeedback},
-			PayloadType:        45,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=45", nil},
-			PayloadType:        46,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP9, 90000, 0, "profile-id=0", videoRTCPFeedback},
-			PayloadType:        98,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=98", nil},
-			PayloadType:        99,
-		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP9, 90000, 0, "profile-id=2", videoRTCPFeedback},
-			PayloadType:        100,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=100", nil},
-			PayloadType:        101,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{
-				webrtc.MimeTypeH264, 90000, 0,
-				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f",
-				videoRTCPFeedback,
-			},
-			PayloadType: 112,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=112", nil},
-			PayloadType:        113,
-		},
-	}
-
+	// Audio codecs optimized for voice communication
 	audioCodecs = []webrtc.RTPCodecParameters{
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{"audio/red", 48000, 2, "111/111", nil},
-			PayloadType:        63,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     "audio/red",
+				ClockRate:    48000,
+				Channels:     2,
+				SDPFmtpLine:  "111/111",
+				RTCPFeedback: nil,
+			},
+			PayloadType: 63,
 		},
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
-			PayloadType:        111,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeOpus,
+				ClockRate:    48000,
+				Channels:     2,
+				SDPFmtpLine:  "minptime=10;useinbandfec=1",
+				RTCPFeedback: nil,
+			},
+			PayloadType: 111,
 		},
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeG722, 8000, 0, "", nil},
-			PayloadType:        rtp.PayloadTypeG722,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeG722,
+				ClockRate:    8000,
+				Channels:     0,
+				SDPFmtpLine:  "",
+				RTCPFeedback: nil,
+			},
+			PayloadType: rtp.PayloadTypeG722,
 		},
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMU, 8000, 0, "", nil},
-			PayloadType:        rtp.PayloadTypePCMU,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypePCMU,
+				ClockRate:    8000,
+				Channels:     0,
+				SDPFmtpLine:  "",
+				RTCPFeedback: nil,
+			},
+			PayloadType: rtp.PayloadTypePCMU,
 		},
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMA, 8000, 0, "", nil},
-			PayloadType:        rtp.PayloadTypePCMA,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypePCMA,
+				ClockRate:    8000,
+				Channels:     0,
+				SDPFmtpLine:  "",
+				RTCPFeedback: nil,
+			},
+			PayloadType: rtp.PayloadTypePCMA,
 		},
 	}
 
-	H264KeyFrame2x2SPS = []byte{
-		0x67, 0x42, 0xc0, 0x1f, 0x0f, 0xd9, 0x1f, 0x88,
-		0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
-		0x00, 0x03, 0x00, 0xc8, 0x3c, 0x60, 0xc9, 0x20,
-	}
-	H264KeyFrame2x2PPS = []byte{
-		0x68, 0x87, 0xcb, 0x83, 0xcb, 0x20,
-	}
-	H264KeyFrame2x2IDR = []byte{
-		0x65, 0x88, 0x84, 0x0a, 0xf2, 0x62, 0x80, 0x00,
-		0xa7, 0xbe,
-	}
-	H264KeyFrame2x2 = [][]byte{H264KeyFrame2x2SPS, H264KeyFrame2x2PPS, H264KeyFrame2x2IDR}
-
+	// Opus silence frame for muting/hold functionality
 	OpusSilenceFrame = []byte{
 		0xf8, 0xff, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -210,6 +84,7 @@ var (
 func RegisterCodecs(m *webrtc.MediaEngine, codecs []string) error {
 	errors := []error{}
 
+	// Only register audio codecs for voice-only SFU
 	for _, codec := range audioCodecs {
 		if slices.Contains(codecs, codec.MimeType) {
 			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
@@ -218,42 +93,13 @@ func RegisterCodecs(m *webrtc.MediaEngine, codecs []string) error {
 		}
 	}
 
-	registeredVideoCodecs := make([]webrtc.RTPCodecParameters, 0)
-
-	for _, codec := range videoCodecs {
-
-		if slices.Contains(codecs, codec.MimeType) {
-			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
-				errors = append(errors, err)
-			}
-
-			registeredVideoCodecs = append(registeredVideoCodecs, codec)
-		}
-	}
-
-	for _, codec := range registeredVideoCodecs {
-		for _, videoCodec := range videoCodecs {
-			if videoCodec.RTPCodecCapability.MimeType == "video/rtx" && videoCodec.RTPCodecCapability.SDPFmtpLine == fmt.Sprintf("apt=%d", codec.PayloadType) {
-				if err := m.RegisterCodec(videoCodec, webrtc.RTPCodecTypeVideo); err != nil {
-					errors = append(errors, err)
-				}
-			}
-		}
-	}
-
 	return FlattenErrors(errors)
 }
 
 func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
-	// Default Pion Audio Codecs
+	// Register only audio codecs for voice-only SFU
 	for _, codec := range audioCodecs {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
-			return err
-		}
-	}
-
-	for _, codec := range videoCodecs {
-		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
 			return err
 		}
 	}
@@ -261,39 +107,11 @@ func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
 	return nil
 }
 
-// credit to Livekit code
-// taken from https://github.com/livekit/livekit/blob/989d621c9746f1912fc44f8f8021a0388fdd773f/pkg/sfu/downtrack.go#L1429
-func getH264BlankFrame() []byte {
-
-	buf := make([]byte, 1000)
-	offset := 0
-	buf[0] = 0x18 // STAP-A
-	offset++
-	for _, payload := range H264KeyFrame2x2 {
-		binary.BigEndian.PutUint16(buf[offset:], uint16(len(payload)))
-		offset += 2
-		copy(buf[offset:offset+len(payload)], payload)
-		offset += len(payload)
-	}
-
-	return buf[:offset]
-}
-
-// reuse from pion media engine and media sample
+// Audio-only payloader for voice communication
 func PayloaderForCodec(codec webrtc.RTPCodecCapability) (rtp.Payloader, error) {
 	switch strings.ToLower(codec.MimeType) {
-	case strings.ToLower(webrtc.MimeTypeH264):
-		return &codecs.H264Payloader{}, nil
 	case strings.ToLower(webrtc.MimeTypeOpus):
 		return &codecs.OpusPayloader{}, nil
-	case strings.ToLower(webrtc.MimeTypeVP8):
-		return &codecs.VP8Payloader{
-			EnablePictureID: true,
-		}, nil
-	case strings.ToLower(webrtc.MimeTypeVP9):
-		return &codecs.VP9Payloader{}, nil
-	case strings.ToLower(webrtc.MimeTypeAV1):
-		return &codecs.AV1Payloader{}, nil
 	case strings.ToLower(webrtc.MimeTypeG722):
 		return &codecs.G722Payloader{}, nil
 	case strings.ToLower(webrtc.MimeTypePCMU), strings.ToLower(webrtc.MimeTypePCMA):
@@ -320,20 +138,14 @@ func SendMediaSamples(p rtp.Packetizer, sequencer rtp.Sequencer, localRTP *webrt
 
 	writeErrs := []error{}
 
-	framerate := 30
-
-	if localRTP.Kind() == webrtc.RTPCodecTypeAudio {
-		framerate = 50
-	}
-
-	frameDuration := time.Duration(1000/framerate) * time.Millisecond
+	// Audio frame rate: 50 fps (20ms intervals) for optimal audio quality
+	frameDuration := time.Duration(20) * time.Millisecond
 
 	ticker := time.NewTicker(frameDuration)
 	defer ticker.Stop()
 
 	for _, p := range packets {
 		if err := localRTP.WriteRTP(p); err != nil {
-			log.Println("send packet size: ", len(p.Payload))
 			writeErrs = append(writeErrs, err)
 		}
 		<-ticker.C
@@ -348,13 +160,6 @@ func getPayloadType(mimeType string) webrtc.PayloadType {
 			return codec.PayloadType
 		}
 	}
-
-	for _, codec := range videoCodecs {
-		if codec.RTPCodecCapability.MimeType == mimeType {
-			return codec.PayloadType
-		}
-	}
-
 	return 0
 }
 
@@ -364,13 +169,6 @@ func getRTPParameters(mimeType string) webrtc.RTPCodecParameters {
 			return codec
 		}
 	}
-
-	for _, codec := range videoCodecs {
-		if codec.RTPCodecCapability.MimeType == mimeType {
-			return codec
-		}
-	}
-
 	return webrtc.RTPCodecParameters{}
 }
 
@@ -380,12 +178,5 @@ func getCodecCapability(mimeType string) webrtc.RTPCodecCapability {
 			return codec.RTPCodecCapability
 		}
 	}
-
-	for _, codec := range videoCodecs {
-		if codec.RTPCodecCapability.MimeType == mimeType {
-			return codec.RTPCodecCapability
-		}
-	}
-
 	return webrtc.RTPCodecCapability{}
 }

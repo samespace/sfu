@@ -241,8 +241,3 @@ func (t *clientTrack) getQuality() QualityLevel {
 
 	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 }
-
-func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
-
-	return DefaultQualityPresets[lvl]
-}
