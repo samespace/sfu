@@ -700,6 +700,112 @@ func (c *Client) IsAllowNegotiation() bool {
 	return true
 }
 
+func (c *Client) CreateOffer() (*webrtc.SessionDescription, error) {
+	c.isInRemoteNegotiation.Store(true)
+
+	offer, err := c.peerConnection.PC().CreateOffer(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sets the LocalDescription, and starts our UDP listeners
+	err = c.peerConnection.PC().SetLocalDescription(offer)
+	if err != nil {
+		c.log.Errorf("client: error set local description ", err)
+		return nil, err
+	}
+
+	return &offer, nil
+}
+
+func (c *Client) Answer(answer *webrtc.SessionDescription) error {
+	c.isInRemoteNegotiation.Store(true)
+
+	defer func() {
+		c.isInRemoteNegotiation.Store(false)
+		if c.negotiationNeeded.Load() {
+			c.renegotiate(false)
+		}
+	}()
+
+	currentReceiversCount := 0
+	currentSendersCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			currentReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			currentSendersCount++
+		}
+	}
+
+	if !c.receiveRED {
+		match, err := regexp.MatchString(`a=rtpmap:63`, answer.SDP)
+		if err != nil {
+			c.log.Errorf("client: error on check RED support in SDP ", err)
+		} else {
+			c.receiveRED = match
+		}
+	}
+
+	// Set the remote SessionDescription
+	err := c.peerConnection.PC().SetRemoteDescription(*answer)
+	if err != nil {
+		c.log.Errorf("client: error set remote description ", err)
+		return err
+	}
+
+	var gatherComplete <-chan struct{}
+
+	if !c.options.IceTrickle {
+		gatherComplete = webrtc.GatheringCompletePromise(c.peerConnection.PC())
+	}
+
+	if !c.options.IceTrickle {
+		<-gatherComplete
+	}
+
+	// allow add candidates once the local description is set
+	c.canAddCandidate.Store(true)
+
+	// process pending ice
+	for _, iceCandidate := range c.pendingRemoteCandidates {
+		err = c.peerConnection.PC().AddICECandidate(iceCandidate)
+		if err != nil {
+			c.log.Errorf("client: error add ice candidate ", err)
+			return err
+		}
+	}
+
+	newReceiversCount := 0
+	newSenderCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			newReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			newSenderCount++
+		}
+	}
+
+	initialReceiverCount := newReceiversCount - currentReceiversCount
+
+	c.initialReceiverCount.Store(uint32(initialReceiverCount))
+
+	initialSenderCount := newSenderCount - currentSendersCount
+
+	c.initialSenderCount.Store(uint32(initialSenderCount))
+
+	// send pending local candidates if any
+	go c.sendPendingLocalCandidates()
+
+	c.pendingRemoteCandidates = nil
+
+	return nil
+}
+
 func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	c.isInRemoteNegotiation.Store(true)
 
