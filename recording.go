@@ -149,10 +149,16 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 		}
 
 		track.OnRead(func(attrs interceptor.Attributes, pkt *rtp.Packet, q QualityLevel) {
-			if session.paused || session.stopped {
+			session.mu.Lock()
+			stopped := session.stopped
+			paused := session.paused
+			session.mu.Unlock()
+
+			if stopped || paused {
 				return
 			}
-			if pkt != nil {
+
+			if pkt != nil && source != nil && source.jb != nil {
 				cloned := pkt.Clone()
 				if cloned != nil {
 					source.jb.push(cloned)
@@ -230,13 +236,25 @@ func (r *Room) StartRecording(cfg RecordingConfig) (string, error) {
 func (r *Room) PauseRecording() error {
 	r.recordingMu.Lock()
 	defer r.recordingMu.Unlock()
-	if r.recordingSession == nil {
+
+	session := r.recordingSession
+	if session == nil {
 		return fmt.Errorf("no recording in progress")
 	}
-	r.recordingSession.mu.Lock()
-	r.recordingSession.paused = true
-	r.recordingSession.meta.Events = append(r.recordingSession.meta.Events, Event{Type: "pause", Time: time.Now(), Data: nil})
-	r.recordingSession.mu.Unlock()
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.stopped {
+		return fmt.Errorf("recording already stopped")
+	}
+
+	if session.paused {
+		return fmt.Errorf("recording already paused")
+	}
+
+	session.paused = true
+	session.meta.Events = append(session.meta.Events, Event{Type: "pause", Time: time.Now(), Data: nil})
 	return nil
 }
 
@@ -244,13 +262,25 @@ func (r *Room) PauseRecording() error {
 func (r *Room) ResumeRecording() error {
 	r.recordingMu.Lock()
 	defer r.recordingMu.Unlock()
-	if r.recordingSession == nil {
+
+	session := r.recordingSession
+	if session == nil {
 		return fmt.Errorf("no recording in progress")
 	}
-	r.recordingSession.mu.Lock()
-	r.recordingSession.paused = false
-	r.recordingSession.meta.Events = append(r.recordingSession.meta.Events, Event{Type: "resume", Time: time.Now(), Data: nil})
-	r.recordingSession.mu.Unlock()
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.stopped {
+		return fmt.Errorf("recording already stopped")
+	}
+
+	if !session.paused {
+		return fmt.Errorf("recording is not paused")
+	}
+
+	session.paused = false
+	session.meta.Events = append(session.meta.Events, Event{Type: "resume", Time: time.Now(), Data: nil})
 	return nil
 }
 
@@ -267,7 +297,12 @@ func (r *Room) StopRecording() error {
 	fmt.Printf("stopping recording: %s", session.id)
 
 	session.mu.Lock()
-	defer session.mu.Unlock()
+
+	// Check if already stopped to avoid double-stop
+	if session.stopped {
+		session.mu.Unlock()
+		return fmt.Errorf("recording already stopped")
+	}
 
 	session.meta.StopTime = time.Now()
 	session.stopped = true
@@ -285,10 +320,19 @@ func (r *Room) StopRecording() error {
 		session.channelTwoMixer.Stop()
 	}
 
-	fmt.Printf("writing meta.json: %s", session.id)
+	// Copy meta data before unlocking to avoid race conditions
+	metaCopy := session.meta
+	sessionID := session.id
+	basePath := session.cfg.BasePath
+	s3Config := session.cfg.S3
+	startTime := session.meta.StartTime
+
+	session.mu.Unlock()
+
+	fmt.Printf("writing meta.json: %s", sessionID)
 
 	// Write meta.json
-	metaFile := filepath.Join(session.cfg.BasePath, session.id, "meta.json")
+	metaFile := filepath.Join(basePath, sessionID, "meta.json")
 	f, err := os.Create(metaFile)
 	if err != nil {
 		return err
@@ -296,12 +340,12 @@ func (r *Room) StopRecording() error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(session.meta); err != nil {
+	if err := enc.Encode(metaCopy); err != nil {
 		return err
 	}
 
 	// merge and upload
-	go r.mergeAndUpload(session.cfg.BasePath, session.id, oneExists, twoExists, session.cfg.S3, session.meta.StartTime)
+	go r.mergeAndUpload(basePath, sessionID, oneExists, twoExists, s3Config, startTime)
 
 	r.recordingSession = nil
 	return nil

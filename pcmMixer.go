@@ -227,7 +227,8 @@ func (m *Mixer) startSource(ctx context.Context, src *Source, jb *tinyJitterBuff
 		case <-ticker.C:
 			rtpPkt, gap := jb.popNext()
 			pcm := m.getBuf()
-			if gap || rtpPkt == nil {
+			if gap || rtpPkt == nil || len(rtpPkt.Payload) == 0 {
+				// Gap in sequence, nil packet, or empty payload - insert silence
 				zeroSlice(pcm)
 			} else {
 				n, err := dec.Decode(rtpPkt.Payload, pcm)
