@@ -88,6 +88,10 @@ type RoomOptions struct {
 	QualityLevels []QualityLevel `json:"quality_levels,omitempty"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
 	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,ompitempty" example:"300000000000" default:"300000000000"`
+	// Configure the maximum number of video tracks that can be pre-allocated for clients without renegotiation capability
+	MaxVideoTracks int `json:"max_video_tracks,omitempty"`
+	// Configure the maximum number of audio tracks that can be pre-allocated for clients without renegotiation capability
+	MaxAudioTracks int `json:"max_audio_tracks,omitempty"`
 }
 
 func DefaultRoomOptions() RoomOptions {
@@ -99,6 +103,8 @@ func DefaultRoomOptions() RoomOptions {
 		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
 		PLIInterval:      &pli,
 		EmptyRoomTimeout: &emptyDuration,
+		MaxVideoTracks:   10,
+		MaxAudioTracks:   10,
 	}
 }
 

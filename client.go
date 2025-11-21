@@ -70,6 +70,7 @@ var (
 
 type ClientOptions struct {
 	IceTrickle           bool          `json:"ice_trickle"`
+	EnableRenegotiation  bool          `json:"enable_renegotiation"`
 	IdleTimeout          time.Duration `json:"idle_timeout"`
 	Type                 string        `json:"type"`
 	EnableVoiceDetection bool          `json:"enable_voice_detection"`
@@ -154,6 +155,8 @@ type Client struct {
 	peerConnection        *PeerConnection
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
+	// pending queued tracks are client tracks that couldn't be added because no transceivers were available (for non-renegotiation clients)
+	pendingQueuedTracks []iClientTrack
 	// pending published tracks are the remote tracks that still state as unknown source, and can't be published until the client state the source media or screen
 	// the source can be set through client.SetTracksSourceType()
 	pendingPublishedTracks *trackList
@@ -205,6 +208,7 @@ type Client struct {
 func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
 		IceTrickle:           true,
+		EnableRenegotiation:  true,
 		IdleTimeout:          5 * time.Minute,
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: true,
@@ -359,6 +363,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		tracks:                         newTrackList(opts.Log),
 		options:                        opts,
 		pendingReceivedTracks:          make([]SubscribeTrackRequest, 0),
+		pendingQueuedTracks:            make([]iClientTrack, 0),
 		pendingPublishedTracks:         newTrackList(opts.Log),
 		pendingRemoteRenegotiation:     &atomic.Bool{},
 		publishedTracks:                newTrackList(opts.Log),
@@ -619,7 +624,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	peerConnection.OnNegotiationNeeded(func() {
-		client.renegotiate(false)
+		if client.options.EnableRenegotiation {
+			client.renegotiate(false)
+		}
 	})
 
 	return client
@@ -843,6 +850,50 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		c.log.Errorf("client: error set remote description ", err)
 
 		return nil, err
+	}
+
+	// Pre-allocate transceivers for clients without renegotiation capability
+	if !c.options.EnableRenegotiation {
+		existingTransceivers := c.peerConnection.PC().GetTransceivers()
+		videoCount := 0
+		audioCount := 0
+
+		for _, t := range existingTransceivers {
+			if t.Receiver().Track() != nil {
+				if t.Receiver().Track().Kind() == webrtc.RTPCodecTypeVideo {
+					videoCount++
+				} else {
+					audioCount++
+				}
+			}
+		}
+
+		maxVideo := c.sfu.maxVideoTracks
+		maxAudio := c.sfu.maxAudioTracks
+
+		// Add additional video transceivers
+		// Use SendRecv direction so they can be used for both sending and receiving
+		for i := videoCount; i < maxVideo; i++ {
+			_, err := c.peerConnection.PC().AddTransceiverFromKind(
+				webrtc.RTPCodecTypeVideo,
+				webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
+			)
+			if err != nil {
+				c.log.Warnf("client: failed to add video transceiver: %v", err)
+			}
+		}
+
+		// Add additional audio transceivers
+		// Use SendRecv direction so they can be used for both sending and receiving
+		for i := audioCount; i < maxAudio; i++ {
+			_, err := c.peerConnection.PC().AddTransceiverFromKind(
+				webrtc.RTPCodecTypeAudio,
+				webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv},
+			)
+			if err != nil {
+				c.log.Warnf("client: failed to add audio transceiver: %v", err)
+			}
+		}
 	}
 
 	// Create answer
@@ -1166,10 +1217,40 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 	localTrack := outputTrack.LocalTrack()
 
-	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
-	if err != nil {
-		c.log.Errorf("client: error on adding track ", err)
-		return nil
+	var senderTcv *webrtc.RTPTransceiver
+
+	if !c.options.EnableRenegotiation {
+		// Find an available unused transceiver
+		transceivers := c.peerConnection.PC().GetTransceivers()
+		for _, tcv := range transceivers {
+			if tcv.Sender().Track() == nil && tcv.Kind() == localTrack.Kind() {
+				// Reuse this transceiver
+				err = tcv.Sender().ReplaceTrack(localTrack)
+				if err != nil {
+					c.log.Errorf("client: error replacing track: %v", err)
+					return nil
+				}
+				senderTcv = tcv
+				break
+			}
+		}
+
+		if senderTcv == nil {
+			// No available transceiver, queue this track
+			c.mu.Lock()
+			c.pendingQueuedTracks = append(c.pendingQueuedTracks, outputTrack)
+			c.mu.Unlock()
+			c.log.Warnf("client: no available transceiver for track %s, queued", outputTrack.ID())
+			return nil
+		}
+	} else {
+		// Original behavior - add new transceiver (triggers renegotiation)
+		senderTcv, err = c.peerConnection.PC().AddTransceiverFromTrack(localTrack,
+			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+		if err != nil {
+			c.log.Errorf("client: error on adding track: %v", err)
+			return nil
+		}
 	}
 
 	// Store the sender for hold/unhold functionality
@@ -1194,6 +1275,11 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		}
 
 		c.peerConnection.PC().RemoveTrack(sender)
+
+		// Try to process queued tracks if this was a non-renegotiation client
+		if !c.options.EnableRenegotiation {
+			go c.processQueuedTracks()
+		}
 	})
 
 	// enable RTCP report and stats
@@ -1216,6 +1302,52 @@ func (c *Client) ClientTracks() map[string]iClientTrack {
 	}
 
 	return clientTracks
+}
+
+// processQueuedTracks attempts to assign queued tracks to available transceivers
+func (c *Client) processQueuedTracks() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.pendingQueuedTracks) == 0 {
+		return
+	}
+
+	transceivers := c.peerConnection.PC().GetTransceivers()
+	remainingTracks := make([]iClientTrack, 0)
+
+	for _, outputTrack := range c.pendingQueuedTracks {
+		assigned := false
+		localTrack := outputTrack.LocalTrack()
+
+		for _, tcv := range transceivers {
+			if tcv.Sender().Track() == nil && tcv.Kind() == localTrack.Kind() {
+				// Assign track to this transceiver
+				err := tcv.Sender().ReplaceTrack(localTrack)
+				if err == nil {
+					c.peerConnection.StoreSender(outputTrack.ID(), tcv.Sender(), localTrack)
+					assigned = true
+					c.log.Infof("client: assigned queued track %s to transceiver", outputTrack.ID())
+
+					// Set up the track properly
+					c.muTracks.Lock()
+					c.clientTracks[outputTrack.ID()] = outputTrack
+					c.muTracks.Unlock()
+
+					// Enable RTCP report and stats
+					c.enableReportAndStats(tcv.Sender(), outputTrack)
+
+					break
+				}
+			}
+		}
+
+		if !assigned {
+			remainingTracks = append(remainingTracks, outputTrack)
+		}
+	}
+
+	c.pendingQueuedTracks = remainingTracks
 }
 
 func readRTCP(r *webrtc.RTPSender, b []byte) ([]rtcp.Packet, interceptor.Attributes, error) {

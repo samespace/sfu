@@ -208,6 +208,13 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	opts.EnableOpusDTX = true
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
+
+	// Example: For clients without renegotiation capability (e.g., simple WebRTC clients)
+	// Uncomment the following lines to disable trickle ICE and renegotiation:
+	// opts.IceTrickle = false           // No trickle ICE - wait for all candidates
+	// opts.EnableRenegotiation = false  // No renegotiation - pre-allocate transceivers
+	// Note: Make sure room MaxVideoTracks and MaxAudioTracks are configured appropriately
+
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
