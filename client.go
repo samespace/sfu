@@ -725,6 +725,81 @@ func (c *Client) CreateOffer() (*webrtc.SessionDescription, error) {
 	return &offer, nil
 }
 
+// CreateOfferForNonRenegotiationClient creates an SDP offer with pre-allocated transceivers
+// for clients that cannot handle renegotiation. This should be used when EnableRenegotiation is false.
+// The SFU creates the offer with multiple transceivers, and the client responds with an answer.
+func (c *Client) CreateOfferForNonRenegotiationClient() (*webrtc.SessionDescription, error) {
+	c.isInRemoteNegotiation.Store(true)
+
+	if c.options.EnableRenegotiation {
+		c.log.Warnf("client: CreateOfferForNonRenegotiationClient called but EnableRenegotiation is true")
+	}
+
+	maxVideo := c.sfu.maxVideoTracks
+	maxAudio := c.sfu.maxAudioTracks
+
+	c.log.Infof("client: %s creating offer with %d video and %d audio transceivers for non-renegotiation client",
+		c.ID(), maxVideo, maxAudio)
+
+	// Add video transceivers
+	for i := 0; i < maxVideo; i++ {
+		_, err := c.peerConnection.PC().AddTransceiverFromKind(
+			webrtc.RTPCodecTypeVideo,
+			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
+		)
+		if err != nil {
+			c.log.Warnf("client: failed to add video transceiver %d: %v", i, err)
+		}
+	}
+
+	// Add audio transceivers
+	for i := 0; i < maxAudio; i++ {
+		_, err := c.peerConnection.PC().AddTransceiverFromKind(
+			webrtc.RTPCodecTypeAudio,
+			webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
+		)
+		if err != nil {
+			c.log.Warnf("client: failed to add audio transceiver %d: %v", i, err)
+		}
+	}
+
+	// Create the offer
+	offer, err := c.peerConnection.PC().CreateOffer(nil)
+	if err != nil {
+		c.log.Errorf("client: error creating offer: %v", err)
+		return nil, err
+	}
+
+	var gatherComplete <-chan struct{}
+	if !c.options.IceTrickle {
+		gatherComplete = webrtc.GatheringCompletePromise(c.peerConnection.PC())
+	}
+
+	// Set local description
+	err = c.peerConnection.PC().SetLocalDescription(offer)
+	if err != nil {
+		c.log.Errorf("client: error set local description: %v", err)
+		return nil, err
+	}
+
+	// Wait for ICE gathering if trickle ICE is disabled
+	if !c.options.IceTrickle {
+		c.log.Infof("client: %s waiting for ICE gathering to complete", c.ID())
+		<-gatherComplete
+	}
+
+	// Allow adding candidates
+	c.canAddCandidate.Store(true)
+
+	// Apply opus settings to SDP
+	sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+
+	c.log.Infof("client: %s offer created successfully with %d m= lines",
+		c.ID(), len(c.peerConnection.PC().GetTransceivers()))
+
+	return &sdp, nil
+}
+
 func (c *Client) Answer(answer *webrtc.SessionDescription) error {
 	c.isInRemoteNegotiation.Store(true)
 
@@ -763,18 +838,9 @@ func (c *Client) Answer(answer *webrtc.SessionDescription) error {
 		return err
 	}
 
-	var gatherComplete <-chan struct{}
-
-	if !c.options.IceTrickle {
-		gatherComplete = webrtc.GatheringCompletePromise(c.peerConnection.PC())
-	}
-
-	if !c.options.IceTrickle {
-		<-gatherComplete
-	}
-
-	// allow add candidates once the local description is set
-	c.canAddCandidate.Store(true)
+	// Note: We don't wait for ICE gathering here because the local description
+	// was already set when CreateOffer() or CreateOfferForNonRenegotiationClient() was called.
+	// The canAddCandidate flag should already be set to true at that point.
 
 	// process pending ice
 	for _, iceCandidate := range c.pendingRemoteCandidates {

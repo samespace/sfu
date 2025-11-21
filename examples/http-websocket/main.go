@@ -210,10 +210,24 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	opts.ReorderPackets = false
 
 	// Example: For clients without renegotiation capability (e.g., simple WebRTC clients)
-	// Uncomment the following lines to disable trickle ICE and renegotiation:
-	// opts.IceTrickle = false           // No trickle ICE - wait for all candidates
-	// opts.EnableRenegotiation = false  // No renegotiation - pre-allocate transceivers
+	// There are two approaches:
+	//
+	// Approach 1: Client sends offer, SFU responds with answer (limited - client must include all transceivers in offer)
+	// opts.IceTrickle = false
+	// opts.EnableRenegotiation = false
+	// client, err := r.AddClient(clientID, clientID, opts)
+	// // Then use client.Negotiate(offer) when you receive the client's offer
+	//
+	// Approach 2: SFU sends offer, client responds with answer (RECOMMENDED for non-renegotiation clients)
+	// opts.IceTrickle = false
+	// opts.EnableRenegotiation = false
+	// client, err := r.AddClient(clientID, clientID, opts)
+	// offer, err := client.CreateOfferForNonRenegotiationClient()
+	// // Send this offer to the client
+	// // When you receive the client's answer, call: client.Answer(&answer)
+	//
 	// Note: Make sure room MaxVideoTracks and MaxAudioTracks are configured appropriately
+	// in DefaultRoomOptions() to match the expected number of participants
 
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
