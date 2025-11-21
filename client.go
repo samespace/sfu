@@ -858,18 +858,20 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		videoCount := 0
 		audioCount := 0
 
+		// Count all transceivers by kind, not just those with active tracks
 		for _, t := range existingTransceivers {
-			if t.Receiver().Track() != nil {
-				if t.Receiver().Track().Kind() == webrtc.RTPCodecTypeVideo {
-					videoCount++
-				} else {
-					audioCount++
-				}
+			if t.Kind() == webrtc.RTPCodecTypeVideo {
+				videoCount++
+			} else if t.Kind() == webrtc.RTPCodecTypeAudio {
+				audioCount++
 			}
 		}
 
 		maxVideo := c.sfu.maxVideoTracks
 		maxAudio := c.sfu.maxAudioTracks
+
+		c.log.Infof("client: %s existing transceivers - video: %d, audio: %d, will add video: %d, audio: %d",
+			c.ID(), videoCount, audioCount, maxVideo-videoCount, maxAudio-audioCount)
 
 		// Add additional video transceivers
 		// Use SendRecv direction so they can be used for both sending and receiving
@@ -1222,6 +1224,9 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	if !c.options.EnableRenegotiation {
 		// Find an available unused transceiver
 		transceivers := c.peerConnection.PC().GetTransceivers()
+		c.log.Infof("client: %s searching for available %s transceiver among %d total transceivers", 
+			c.ID(), localTrack.Kind(), len(transceivers))
+		
 		for _, tcv := range transceivers {
 			if tcv.Sender().Track() == nil && tcv.Kind() == localTrack.Kind() {
 				// Reuse this transceiver
@@ -1231,6 +1236,8 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 					return nil
 				}
 				senderTcv = tcv
+				c.log.Infof("client: %s assigned track %s (%s) to available transceiver", 
+					c.ID(), outputTrack.ID(), localTrack.Kind())
 				break
 			}
 		}
@@ -1240,7 +1247,8 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			c.mu.Lock()
 			c.pendingQueuedTracks = append(c.pendingQueuedTracks, outputTrack)
 			c.mu.Unlock()
-			c.log.Warnf("client: no available transceiver for track %s, queued", outputTrack.ID())
+			c.log.Warnf("client: %s no available transceiver for track %s (%s), queued (queue size: %d)", 
+				c.ID(), outputTrack.ID(), localTrack.Kind(), len(c.pendingQueuedTracks))
 			return nil
 		}
 	} else {
@@ -1312,6 +1320,8 @@ func (c *Client) processQueuedTracks() {
 	if len(c.pendingQueuedTracks) == 0 {
 		return
 	}
+
+	c.log.Infof("client: %s processing %d queued tracks", c.ID(), len(c.pendingQueuedTracks))
 
 	transceivers := c.peerConnection.PC().GetTransceivers()
 	remainingTracks := make([]iClientTrack, 0)
