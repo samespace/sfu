@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package speechanalysis;
+
+option go_package = "github.com/inlivedev/sfu/proto/speechanalysis";
+
+service SpeechAnalysis {
+  rpc StreamSentiment(stream AudioChunk) returns (SentimentResponse);
+}
+
+message AudioChunk {
+  bytes audio_data = 1;
+  int32 chunk_number = 2;
+  bool is_final = 3;
+  string callback_url = 4;
+}
+
+message SentimentResponse {
+  string status = 1;
+  string message = 2;
+}

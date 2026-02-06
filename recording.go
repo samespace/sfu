@@ -40,6 +40,7 @@ type RecordingConfig struct {
 	BasePath       string
 	ChannelMapping map[string]ChannelType
 	S3             S3Config
+	SpeechAnalysis SpeechAnalysisConfig
 }
 
 type recordingSession struct {
@@ -326,6 +327,7 @@ func (r *Room) StopRecording() error {
 	basePath := session.cfg.BasePath
 	s3Config := session.cfg.S3
 	startTime := session.meta.StartTime
+	speechCfg := session.cfg.SpeechAnalysis
 
 	session.mu.Unlock()
 
@@ -344,8 +346,28 @@ func (r *Room) StopRecording() error {
 		return err
 	}
 
-	// merge and upload
-	go r.mergeAndUpload(basePath, sessionID, oneExists, twoExists, s3Config, startTime)
+	// merge/upload and speech analysis run in parallel; cleanup after both complete
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		r.mergeAndUpload(basePath, sessionID, oneExists, twoExists, s3Config, startTime)
+	}()
+
+	if speechCfg.Enable && r.sfu.speechAnalysisAddr != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.streamSpeechAnalysis(basePath, sessionID, oneExists, twoExists, speechCfg.CallbackURL)
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		fmt.Println("removing local files: ", filepath.Join(basePath, sessionID))
+		os.RemoveAll(filepath.Join(basePath, sessionID))
+	}()
 
 	r.recordingSession = nil
 	return nil
@@ -408,10 +430,6 @@ func (r *Room) mergeAndUpload(basePath string, id string, oneExists bool, twoExi
 		return err
 	}
 	fmt.Println("uploaded to s3: ", object)
-
-	// Cleanup local files - happens only if the upload is successful
-	fmt.Println("removing local files: ", filepath.Join(basePath, id))
-	os.RemoveAll(filepath.Join(basePath, id))
 
 	return nil
 }

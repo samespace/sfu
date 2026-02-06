@@ -122,6 +122,7 @@ type SFU struct {
 	clientStats               map[string]*ClientStats
 	log                       logging.LeveledLogger
 	defaultSettingEngine      *webrtc.SettingEngine
+	speechAnalysisAddr        string
 }
 
 type PublishedTrack struct {
@@ -130,13 +131,14 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers    []webrtc.ICEServer
-	Bitrates      BitrateConfigs
-	QualityLevels []QualityLevel
-	Codecs        []string
-	PLIInterval   time.Duration
-	Log           logging.LeveledLogger
-	SettingEngine *webrtc.SettingEngine
+	IceServers         []webrtc.ICEServer
+	Bitrates           BitrateConfigs
+	QualityLevels      []QualityLevel
+	Codecs             []string
+	PLIInterval        time.Duration
+	Log                logging.LeveledLogger
+	SettingEngine      *webrtc.SettingEngine
+	SpeechAnalysisAddr string
 }
 
 // @Param muxPort: port for udp mux
@@ -159,6 +161,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		onClientAddedCallbacks:    make([]func(*Client), 0),
 		log:                       opts.Log,
 		defaultSettingEngine:      opts.SettingEngine,
+		speechAnalysisAddr:        opts.SpeechAnalysisAddr,
 	}
 
 	return sfu

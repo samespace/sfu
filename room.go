@@ -24,6 +24,9 @@ type Options struct {
 	// SettingEngine is used to configure the WebRTC engine
 	// Use this to configure use of enable/disable mDNS, network types, use single port mux, etc.
 	SettingEngine *webrtc.SettingEngine
+	// SpeechAnalysisAddr is the address of the gRPC speech analysis server (e.g. "localhost:50051").
+	// Leave empty to disable speech analysis globally.
+	SpeechAnalysisAddr string
 }
 
 func DefaultOptions() Options {
