@@ -177,7 +177,11 @@ func (s *SFU) addClient(client *Client) {
 }
 
 func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
-	opts.settingEngine = *s.defaultSettingEngine
+	if opts.SettingEngine != nil {
+		opts.settingEngine = *opts.SettingEngine
+	} else {
+		opts.settingEngine = *s.defaultSettingEngine
+	}
 
 	client := NewClient(s, id, name, peerConnectionConfig, opts)
 

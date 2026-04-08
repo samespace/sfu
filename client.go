@@ -94,6 +94,7 @@ type ClientOptions struct {
 	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
+	SettingEngine  *webrtc.SettingEngine
 	settingEngine  webrtc.SettingEngine
 	qualityLevels  []QualityLevel
 }
